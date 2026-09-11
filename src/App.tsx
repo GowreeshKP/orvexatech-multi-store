@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 
 // --- THE LUNAR CLOTHING OFFICIAL PRODUCT DATASET ---
 export interface Product {
@@ -43,6 +43,189 @@ export interface Review {
   comment: string
   verified: boolean
 }
+
+export interface UserAccount {
+  name: string
+  email: string
+  phone: string
+  verified: boolean
+}
+
+export interface OrderItem {
+  name: string
+  price: number
+  quantity: number
+  size: string
+  lining?: string
+  zip?: string
+  length?: string
+  image: string
+}
+
+export interface TrackedOrder {
+  id: string
+  date: string
+  status: 'Processing' | 'In Transit' | 'Out for Delivery' | 'Delivered'
+  courier: string
+  awb: string
+  estimatedDelivery: string
+  items: OrderItem[]
+  subtotal: number
+  shipping: number
+  total: number
+  paymentMethod: string
+  shippingAddress: {
+    name: string
+    phone: string
+    address: string
+    city: string
+    state: string
+    pincode: string
+  }
+  timeline: {
+    title: string
+    time: string
+    desc: string
+    completed: boolean
+    current?: boolean
+  }[]
+}
+
+const INITIAL_ORDERS: TrackedOrder[] = [
+  {
+    id: 'LUNAR-892410',
+    date: '09 Sep 2026',
+    status: 'In Transit',
+    courier: 'Blue Dart Express',
+    awb: 'BD8912401IN',
+    estimatedDelivery: 'Tomorrow, by 7:00 PM',
+    subtotal: 2198,
+    shipping: 0,
+    total: 2198,
+    paymentMethod: 'Instant UPI (GPay)',
+    shippingAddress: {
+      name: 'Priya Sharma',
+      phone: '+91 98765 43210',
+      address: 'Flat 402, Sunshine Heights, Jubilee Hills',
+      city: 'Hyderabad',
+      state: 'Telangana',
+      pincode: '500033',
+    },
+    items: [
+      {
+        name: 'Yellow Petal Cotton Maxi',
+        price: 1099,
+        quantity: 1,
+        size: 'M',
+        lining: 'No Lining',
+        zip: 'Both Sides Vertical Feeding Zip (+₹100)',
+        length: '44 inch',
+        image: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
+      },
+      {
+        name: 'Teal Floral Cotton Maxi',
+        price: 1099,
+        quantity: 1,
+        size: 'M',
+        lining: 'Cotton Lining (+₹150)',
+        zip: 'None',
+        length: '44 inch',
+        image: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2171_1.jpg?v=1766941862',
+      },
+    ],
+    timeline: [
+      {
+        title: 'Order Confirmed & Payment Verified',
+        time: '09 Sep 2026, 11:30 AM',
+        desc: 'Payment received via UPI. Order registered with The Lunar Clothing online studio.',
+        completed: true,
+      },
+      {
+        title: 'Artisan Tailoring & Quality Inspection',
+        time: '10 Sep 2026, 03:15 PM',
+        desc: 'Handcrafted garments passed QC inspection and wrapped in Lunar eco-packaging.',
+        completed: true,
+      },
+      {
+        title: 'Dispatched with Blue Dart Express',
+        time: '10 Sep 2026, 07:45 PM',
+        desc: 'Handed over to Blue Dart Express (Hyderabad Hub). Tracking AWB: BD8912401IN.',
+        completed: true,
+      },
+      {
+        title: 'In Transit to Destination Delivery Hub',
+        time: '11 Sep 2026, 08:30 AM',
+        desc: 'Shipment arrived at destination city hub and is out for route sorting.',
+        completed: true,
+        current: true,
+      },
+      {
+        title: 'Out for Doorstep Delivery',
+        time: 'Expected Tomorrow, 10:00 AM',
+        desc: 'Delivery agent will attempt delivery to your address.',
+        completed: false,
+      },
+      {
+        title: 'Delivered',
+        time: 'Expected Tomorrow, by 7:00 PM',
+        desc: 'Package delivered to recipient.',
+        completed: false,
+      },
+    ],
+  },
+  {
+    id: 'LUNAR-719324',
+    date: '22 Aug 2026',
+    status: 'Delivered',
+    courier: 'Delhivery',
+    awb: 'DL839210492',
+    estimatedDelivery: 'Delivered on 25 Aug 2026',
+    subtotal: 1299,
+    shipping: 0,
+    total: 1299,
+    paymentMethod: 'Cash on Delivery (COD)',
+    shippingAddress: {
+      name: 'Priya Sharma',
+      phone: '+91 98765 43210',
+      address: 'Flat 402, Sunshine Heights, Jubilee Hills',
+      city: 'Hyderabad',
+      state: 'Telangana',
+      pincode: '500033',
+    },
+    items: [
+      {
+        name: 'Red Checked Soft Mul Chanderi Dress',
+        price: 1299,
+        quantity: 1,
+        size: 'M',
+        lining: 'Included Breathable Cotton Lining',
+        zip: 'None',
+        length: 'Standard 44 inch',
+        image: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5234.jpg?v=1778607246',
+      },
+    ],
+    timeline: [
+      {
+        title: 'Order Confirmed',
+        time: '22 Aug 2026, 04:10 PM',
+        desc: 'COD order confirmed via SMS.',
+        completed: true,
+      },
+      {
+        title: 'Dispatched via Delhivery',
+        time: '23 Aug 2026, 01:20 PM',
+        desc: 'Courier AWB: DL839210492.',
+        completed: true,
+      },
+      {
+        title: 'Delivered to Doorstep',
+        time: '25 Aug 2026, 02:40 PM',
+        desc: 'Package safely handed over and COD payment received.',
+        completed: true,
+      },
+    ],
+  },
+]
 
 const PRODUCTS: Product[] = [
   {
@@ -332,6 +515,248 @@ const INITIAL_REVIEWS: Review[] = [
   },
 ]
 
+// --- INTERACTIVE LUXURY AMBIENT BACKGROUND SYSTEM ---
+function InteractiveBackground() {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const spotlightRef = useRef<HTMLDivElement | null>(null)
+  const [breezeActive, setBreezeActive] = useState(true)
+  const mouseTargetRef = useRef<{ x: number; y: number }>({ x: -500, y: -500 })
+  const mouseCurrentRef = useRef<{ x: number; y: number }>({ x: -500, y: -500 })
+
+  // Track mouse coordinates for the ambient spotlight
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      mouseTargetRef.current = { x: e.clientX, y: e.clientY }
+    }
+    window.addEventListener('mousemove', handleMouseMove, { passive: true })
+    return () => window.removeEventListener('mousemove', handleMouseMove)
+  }, [])
+
+  // Smooth lerp for the ambient mouse glow directly on DOM node for 60fps performance
+  useEffect(() => {
+    let animId: number
+    const updateGlow = () => {
+      mouseCurrentRef.current.x += (mouseTargetRef.current.x - mouseCurrentRef.current.x) * 0.08
+      mouseCurrentRef.current.y += (mouseTargetRef.current.y - mouseCurrentRef.current.y) * 0.08
+      if (spotlightRef.current) {
+        const x = Math.round(mouseCurrentRef.current.x)
+        const y = Math.round(mouseCurrentRef.current.y)
+        spotlightRef.current.style.background = `radial-gradient(650px circle at ${x}px ${y}px, rgba(244, 162, 175, 0.12), rgba(254, 215, 170, 0.06), transparent 70%)`
+      }
+      animId = requestAnimationFrame(updateGlow)
+    }
+    animId = requestAnimationFrame(updateGlow)
+    return () => cancelAnimationFrame(animId)
+  }, [])
+
+  // Floating organic cotton petals & stardust particles canvas
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    let animationFrameId: number
+    let width = (canvas.width = window.innerWidth)
+    let height = (canvas.height = window.innerHeight)
+
+    const handleResize = () => {
+      if (!canvas) return
+      width = canvas.width = window.innerWidth
+      height = canvas.height = window.innerHeight
+    }
+    window.addEventListener('resize', handleResize)
+
+    // Palette of soft cotton petals and gold stardust
+    const colors = [
+      'rgba(244, 162, 175, 0.45)', // Soft Rose Coral
+      'rgba(255, 230, 200, 0.55)', // Airy Cotton Cream
+      'rgba(245, 205, 120, 0.40)', // Golden Pollen Stardust
+      'rgba(235, 180, 200, 0.40)', // Dusty Mauve
+      'rgba(255, 255, 255, 0.60)', // Pure Cotton Fluff
+    ]
+
+    interface Particle {
+      x: number
+      y: number
+      size: number
+      speedY: number
+      speedX: number
+      rotation: number
+      rotationSpeed: number
+      color: string
+      isPetal: boolean
+      swayOffset: number
+      swaySpeed: number
+      opacity: number
+    }
+
+    const particles: Particle[] = []
+    const PARTICLE_COUNT = 32
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      particles.push({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        size: Math.random() * 8 + 4,
+        speedY: Math.random() * 0.7 + 0.3,
+        speedX: (Math.random() - 0.5) * 0.4,
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 0.02,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        isPetal: Math.random() > 0.35,
+        swayOffset: Math.random() * Math.PI * 2,
+        swaySpeed: Math.random() * 0.02 + 0.01,
+        opacity: Math.random() * 0.5 + 0.3,
+      })
+    }
+
+    let time = 0
+
+    const render = () => {
+      ctx.clearRect(0, 0, width, height)
+      time += 0.015
+
+      if (breezeActive) {
+        particles.forEach((p) => {
+          // Sway movement
+          p.swayOffset += p.swaySpeed
+          const sway = Math.sin(p.swayOffset) * 0.6
+
+          p.y += p.speedY
+          p.x += p.speedX + sway
+          p.rotation += p.rotationSpeed
+
+          // Interactive breeze repulsion from mouse
+          const dx = p.x - mouseTargetRef.current.x
+          const dy = p.y - mouseTargetRef.current.y
+          const dist = Math.sqrt(dx * dx + dy * dy)
+          if (dist < 140 && dist > 0) {
+            const force = (140 - dist) / 140
+            p.x += (dx / dist) * force * 3.5
+            p.y += (dy / dist) * force * 2.5
+          }
+
+          // Loop back to top if off screen
+          if (p.y > height + 20) {
+            p.y = -20
+            p.x = Math.random() * width
+          }
+          if (p.x < -20) p.x = width + 20
+          if (p.x > width + 20) p.x = -20
+
+          ctx.save()
+          ctx.translate(p.x, p.y)
+          ctx.rotate(p.rotation)
+          ctx.fillStyle = p.color
+          ctx.globalAlpha = p.opacity
+
+          if (p.isPetal) {
+            // Draw delicate cotton petal curve
+            ctx.beginPath()
+            ctx.moveTo(0, 0)
+            ctx.quadraticCurveTo(p.size, -p.size * 0.5, p.size * 1.4, 0)
+            ctx.quadraticCurveTo(p.size, p.size * 0.5, 0, 0)
+            ctx.fill()
+          } else {
+            // Draw twinkling stardust sparkle
+            ctx.beginPath()
+            ctx.arc(0, 0, p.size * 0.35, 0, Math.PI * 2)
+            ctx.fill()
+          }
+
+          ctx.restore()
+        })
+      }
+
+      animationFrameId = requestAnimationFrame(render)
+    }
+
+    animationFrameId = requestAnimationFrame(render)
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      cancelAnimationFrame(animationFrameId)
+    }
+  }, [breezeActive])
+
+  return (
+    <>
+      {/* 1. Interactive Cursor Light Spotlight (Smooth warm illumination) */}
+      <div
+        ref={spotlightRef}
+        className="fixed inset-0 pointer-events-none z-30 transition-opacity duration-700 select-none"
+      />
+
+      {/* 2. Ambient Drifting Mesh Orbs (Ethereal luxury atmosphere) */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none">
+        {/* Soft Coral Rose Orb */}
+        <div className="absolute -top-[12%] -left-[10%] w-[550px] h-[550px] rounded-full bg-gradient-to-br from-rose-300/18 via-pink-200/10 to-transparent blur-3xl animate-orb-1 transform-gpu" />
+
+        {/* Warm Golden Honey Orb */}
+        <div className="absolute top-[28%] -right-[12%] w-[620px] h-[620px] rounded-full bg-gradient-to-bl from-amber-200/15 via-orange-100/8 to-transparent blur-3xl animate-orb-2 transform-gpu" />
+
+        {/* Delicate Lunar Lavender Orb */}
+        <div className="absolute -bottom-[15%] left-[20%] w-[580px] h-[580px] rounded-full bg-gradient-to-tr from-purple-200/14 via-indigo-100/6 to-transparent blur-3xl animate-orb-3 transform-gpu" />
+
+        {/* Mid-screen Breath Orb */}
+        <div className="absolute top-[68%] -left-[10%] w-[480px] h-[480px] rounded-full bg-gradient-to-r from-emerald-100/10 via-rose-100/10 to-transparent blur-3xl animate-orb-2 transform-gpu" />
+      </div>
+
+      {/* 3. Interactive Floating Cotton Petals & Sparkle Canvas */}
+      <canvas
+        ref={canvasRef}
+        className="fixed inset-0 pointer-events-none z-20 w-full h-full select-none"
+      />
+
+      {/* 4. Floating Dragonfly Silhouette Brand Watermarks (Matching the Logo) */}
+      <div className="fixed inset-0 pointer-events-none z-[15] overflow-hidden select-none">
+        {/* Top Dragonfly Glide */}
+        <div className="absolute animate-dragonfly-1 opacity-25">
+          <svg width="42" height="42" viewBox="0 0 100 100" fill="none" className="text-rose-900 drop-shadow-sm">
+            {/* Dragonfly wings with flapping micro-animation */}
+            <g className="animate-wing">
+              <ellipse cx="28" cy="42" rx="26" ry="7" fill="currentColor" opacity="0.5" transform="rotate(-15 28 42)" />
+              <ellipse cx="72" cy="42" rx="26" ry="7" fill="currentColor" opacity="0.5" transform="rotate(15 72 42)" />
+              <ellipse cx="30" cy="52" rx="22" ry="5" fill="currentColor" opacity="0.4" transform="rotate(-8 30 52)" />
+              <ellipse cx="70" cy="52" rx="22" ry="5" fill="currentColor" opacity="0.4" transform="rotate(8 70 52)" />
+            </g>
+            {/* Body */}
+            <circle cx="50" cy="38" r="4" fill="currentColor" />
+            <line x1="50" y1="42" x2="50" y2="78" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+        </div>
+
+        {/* Lower Dragonfly Glide */}
+        <div className="absolute animate-dragonfly-2 opacity-20">
+          <svg width="36" height="36" viewBox="0 0 100 100" fill="none" className="text-amber-900 drop-shadow-sm">
+            <g className="animate-wing">
+              <ellipse cx="28" cy="42" rx="26" ry="7" fill="currentColor" opacity="0.5" transform="rotate(-15 28 42)" />
+              <ellipse cx="72" cy="42" rx="26" ry="7" fill="currentColor" opacity="0.5" transform="rotate(15 72 42)" />
+              <ellipse cx="30" cy="52" rx="22" ry="5" fill="currentColor" opacity="0.4" transform="rotate(-8 30 52)" />
+              <ellipse cx="70" cy="52" rx="22" ry="5" fill="currentColor" opacity="0.4" transform="rotate(8 70 52)" />
+            </g>
+            <circle cx="50" cy="38" r="4" fill="currentColor" />
+            <line x1="50" y1="42" x2="50" y2="78" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+        </div>
+      </div>
+
+      {/* 5. Client Interactive Breeze Control Pill (Bottom Left) */}
+      <div className="fixed bottom-6 left-6 z-40">
+        <button
+          onClick={() => setBreezeActive(!breezeActive)}
+          className="flex items-center gap-2 bg-white/85 backdrop-blur-md border border-black/15 shadow-lg hover:border-black text-black px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all hover:scale-105 active:scale-95 cursor-pointer select-none"
+          title="Toggle interactive background breeze"
+        >
+          <span className={`w-2 h-2 rounded-full ${breezeActive ? 'bg-emerald-500 animate-pulse' : 'bg-stone-300'}`} />
+          <span>{breezeActive ? '✨ Floating Breeze: Active' : '✨ Floating Breeze: Paused'}</span>
+        </button>
+      </div>
+    </>
+  )
+}
+
 // 1. Announcement Bar with Electric Blue Moving Marquee Ticker
 function AnnouncementBar({ onDismiss }: { onDismiss: () => void }) {
   const tickerItems = [
@@ -371,19 +796,29 @@ function AnnouncementBar({ onDismiss }: { onDismiss: () => void }) {
 function Navigation({
   cartCount,
   wishlistCount,
+  user,
   onOpenCart,
   onOpenWishlist,
   onOpenSearch,
   onOpenMobileMenu,
+  onOpenAuth,
+  onOpenAccount,
+  onOpenAbout,
+  onOpenContact,
   onNavigate,
   currentCategory,
 }: {
   cartCount: number
   wishlistCount: number
+  user: UserAccount | null
   onOpenCart: () => void
   onOpenWishlist: () => void
   onOpenSearch: () => void
   onOpenMobileMenu: () => void
+  onOpenAuth: () => void
+  onOpenAccount: () => void
+  onOpenAbout: () => void
+  onOpenContact: () => void
   onNavigate: (view: 'home' | 'catalog', category?: string) => void
   currentCategory: string
 }) {
@@ -403,13 +838,18 @@ function Navigation({
           <div className="w-5 h-0.5 bg-black" />
         </button>
 
-        {/* Brand Wordmark */}
-        <div className="flex items-center gap-10">
+        {/* Brand Official Logo */}
+        <div className="flex items-center gap-8">
           <button
             onClick={() => onNavigate('home')}
-            className="text-xl md:text-2xl font-bold tracking-[0.2em] font-sans uppercase hover:opacity-80 transition-opacity cursor-pointer"
+            className="flex items-center hover:opacity-85 transition-opacity cursor-pointer text-left py-0.5"
+            aria-label="The Lunar Clothing Home"
           >
-            THE LUNAR CLOTHING
+            <img
+              src="/lunar-logo.png"
+              alt="The Lunar Clothing"
+              className="h-10 md:h-11 w-auto object-contain rounded-sm shadow-xs"
+            />
           </button>
 
           {/* Desktop Nav Links */}
@@ -519,31 +959,51 @@ function Navigation({
             </div>
 
             <button
-              onClick={() => onNavigate('catalog', 'maxis')}
+              onClick={onOpenAbout}
               className="text-black/80 hover:text-black transition-colors cursor-pointer"
             >
-              COTTON MAXIS
+              ABOUT
             </button>
             <button
-              onClick={() => onNavigate('catalog', 'dresses')}
+              onClick={onOpenContact}
               className="text-black/80 hover:text-black transition-colors cursor-pointer"
             >
-              CHANDERI DRESSES
-            </button>
-            <button
-              onClick={() => onNavigate('catalog', 'kalamkari')}
-              className="text-black/80 hover:text-black transition-colors cursor-pointer"
-            >
-              KALAMKARI
+              CONTACT
             </button>
           </nav>
         </div>
 
         {/* Right Nav Icons */}
-        <div className="flex items-center gap-5">
-          <span className="hidden md:block text-xs font-semibold tracking-wider text-black/80 border border-black/15 px-2.5 py-1 bg-stone-50">
-            ₹ INR
-          </span>
+        <div className="flex items-center gap-4 md:gap-5">
+          {/* User Account / Login & Orders trigger (Replaces INR button) */}
+          {user ? (
+            <button
+              onClick={onOpenAccount}
+              className="flex items-center gap-2 text-xs font-bold tracking-wider text-black hover:bg-stone-100 px-2.5 py-1.5 border border-black/20 hover:border-black transition-all cursor-pointer rounded-xs"
+              title="My Account & Track Orders"
+            >
+              <div className="w-5 h-5 rounded-full bg-black text-white text-[10px] flex items-center justify-center font-bold">
+                {user.name.charAt(0).toUpperCase()}
+              </div>
+              <span className="hidden sm:inline uppercase">{user.name.split(' ')[0]}</span>
+              <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded-xs flex items-center gap-1">
+                <span>ORDERS</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+              </span>
+            </button>
+          ) : (
+            <button
+              onClick={onOpenAuth}
+              className="flex items-center gap-1.5 text-xs font-bold tracking-wider text-black hover:text-black/70 px-2.5 py-1.5 border border-black/25 hover:border-black transition-all cursor-pointer rounded-xs bg-stone-50"
+              title="Log in to track orders"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+              <span>LOG IN</span>
+            </button>
+          )}
 
           {/* Search trigger */}
           <button
@@ -601,6 +1061,11 @@ function MobileMenuDrawer({
   onNavigate,
   onOpenWishlist,
   onOpenSearch,
+  onOpenAuth,
+  onOpenAccount,
+  onOpenAbout,
+  onOpenContact,
+  user,
   wishlistCount,
 }: {
   isOpen: boolean
@@ -608,6 +1073,11 @@ function MobileMenuDrawer({
   onNavigate: (view: 'home' | 'catalog', category?: string) => void
   onOpenWishlist: () => void
   onOpenSearch: () => void
+  onOpenAuth: () => void
+  onOpenAccount: () => void
+  onOpenAbout: () => void
+  onOpenContact: () => void
+  user: UserAccount | null
   wishlistCount: number
 }) {
   if (!isOpen) return null
@@ -619,7 +1089,7 @@ function MobileMenuDrawer({
         <div className="w-screen max-w-xs bg-white shadow-2xl flex flex-col justify-between animate-slide-down p-6">
           <div>
             <div className="flex items-center justify-between border-b border-black/10 pb-4 mb-6">
-              <h3 className="font-bold text-sm tracking-[0.2em] uppercase text-black">THE LUNAR CLOTHING</h3>
+              <img src="/lunar-logo.png" alt="The Lunar Clothing" className="h-8 w-auto object-contain rounded-md" />
               <button onClick={onClose} className="text-black/60 text-lg cursor-pointer">✕</button>
             </div>
 
@@ -656,15 +1126,37 @@ function MobileMenuDrawer({
                 KALAMKARI BLOCK PRINT
               </button>
               <button
-                onClick={() => { onClose(); onNavigate('catalog', 'handloom') }}
-                className="text-left py-2 hover:text-black/60 border-b border-black/5 cursor-pointer"
+                onClick={() => { onClose(); onOpenAbout() }}
+                className="text-left py-2 hover:text-black/60 border-b border-black/5 cursor-pointer text-amber-900"
               >
-                HANDLOOM SERIES
+                ABOUT OUR STUDIO
+              </button>
+              <button
+                onClick={() => { onClose(); onOpenContact() }}
+                className="text-left py-2 hover:text-black/60 border-b border-black/5 cursor-pointer text-amber-900"
+              >
+                CONTACT & CARE
               </button>
             </nav>
           </div>
 
           <div className="border-t border-black/10 pt-6 space-y-3">
+            {user ? (
+              <button
+                onClick={() => { onClose(); onOpenAccount() }}
+                className="w-full flex items-center justify-center gap-2 bg-stone-900 text-white py-2.5 text-xs font-bold tracking-widest uppercase hover:bg-black cursor-pointer"
+              >
+                📦 MY ORDERS & TRACKING ({user.name.split(' ')[0]})
+              </button>
+            ) : (
+              <button
+                onClick={() => { onClose(); onOpenAuth() }}
+                className="w-full flex items-center justify-center gap-2 bg-black text-white py-2.5 text-xs font-bold tracking-widest uppercase hover:bg-stone-800 cursor-pointer"
+              >
+                🔐 LOG IN & TRACK ORDERS
+              </button>
+            )}
+
             <button
               onClick={() => { onClose(); onOpenSearch() }}
               className="w-full flex items-center justify-center gap-2 border border-black/20 py-2.5 text-xs font-bold tracking-widest uppercase hover:bg-stone-50 cursor-pointer"
@@ -831,7 +1323,7 @@ function TrustBar() {
   ]
 
   return (
-    <div className="bg-white border-y border-black/10 py-3.5 overflow-hidden relative select-none">
+    <div className="bg-white/80 backdrop-blur-xs border-y border-black/10 py-3.5 overflow-hidden relative select-none z-10">
       <div className="animate-marquee flex items-center whitespace-nowrap gap-16 text-xs font-bold tracking-[0.18em] uppercase text-black">
         {items.map((item, idx) => (
           <div key={idx} className="flex items-center gap-16">
@@ -960,7 +1452,7 @@ function BestsellersSection({
   onSelectProduct: (id: number) => void
 }) {
   return (
-    <section className="py-20 bg-white">
+    <section className="py-20 bg-white/70 backdrop-blur-xs relative z-10">
       <div className="max-w-screen-2xl mx-auto px-6 mb-8 flex items-end justify-between">
         <div>
           <p className="text-xs font-bold tracking-[0.25em] uppercase text-black/40 mb-2">HANDCRAFTED ETHNIC COLLECTION</p>
@@ -1120,7 +1612,7 @@ function LeggingsFabricMatrix({ onSelectProduct }: { onSelectProduct: (id: numbe
   ]
 
   return (
-    <section className="py-20 bg-[#F5F4F1]">
+    <section className="py-20 bg-[#F5F4F1]/75 backdrop-blur-xs relative z-10">
       <div className="max-w-screen-2xl mx-auto px-6 mb-12">
         <p className="text-xs font-bold tracking-[0.25em] uppercase text-black/40 mb-2">CRAFT & FABRIC MATRIX</p>
         <h2 className="text-4xl md:text-5xl font-normal text-black" style={{ fontFamily: 'var(--font-display)' }}>
@@ -2114,6 +2606,9 @@ function CheckoutModal({
   cart,
   subtotal,
   discountAmount,
+  user,
+  onOrderPlaced,
+  onOpenAccount,
   onCompleteOrder,
 }: {
   isOpen: boolean
@@ -2121,13 +2616,16 @@ function CheckoutModal({
   cart: CartItem[]
   subtotal: number
   discountAmount: number
+  user: UserAccount | null
+  onOrderPlaced: (order: TrackedOrder) => void
+  onOpenAccount: () => void
   onCompleteOrder: () => void
 }) {
   const [step, setStep] = useState<'shipping' | 'payment' | 'success'>('shipping')
   const [formData, setFormData] = useState({
-    name: 'Priya Sharma',
-    email: 'priya.sharma@example.com',
-    phone: '+91 98765 43210',
+    name: user?.name || 'Priya Sharma',
+    email: user?.email || 'priya.sharma@example.com',
+    phone: user?.phone || '+91 98765 43210',
     address: 'Flat 402, Sunshine Heights, Jubilee Hills',
     city: 'Hyderabad',
     state: 'Telangana',
@@ -2148,7 +2646,72 @@ function CheckoutModal({
 
   const handlePlaceOrder = () => {
     const generatedId = 'LUNAR-' + Math.floor(100000 + Math.random() * 900000)
+    const awbCode = 'BD' + Math.floor(100000000 + Math.random() * 900000000) + 'IN'
+    const newTrackedOrder: TrackedOrder = {
+      id: generatedId,
+      date: 'Just now',
+      status: 'Processing',
+      courier: 'Blue Dart Express',
+      awb: awbCode,
+      estimatedDelivery: '3 - 5 Business Days',
+      subtotal,
+      shipping: shippingCost,
+      total: finalTotal,
+      paymentMethod:
+        formData.paymentMethod === 'upi'
+          ? 'Instant UPI (GPay)'
+          : formData.paymentMethod === 'cod'
+          ? 'Cash on Delivery (COD)'
+          : 'Credit / Debit Card',
+      shippingAddress: {
+        name: formData.name,
+        phone: formData.phone,
+        address: formData.address,
+        city: formData.city,
+        state: formData.state,
+        pincode: formData.pincode,
+      },
+      items: cart.map((i) => ({
+        name: i.product.name,
+        price: i.product.price,
+        quantity: i.quantity,
+        size: i.selectedSize,
+        lining: i.selectedLining,
+        zip: i.selectedZip,
+        length: i.selectedLength,
+        image: i.product.imgMain,
+      })),
+      timeline: [
+        {
+          title: 'Order Confirmed & Payment Verified',
+          time: 'Just now',
+          desc: 'Order received and logged in The Lunar Clothing fulfillment studio.',
+          completed: true,
+          current: true,
+        },
+        {
+          title: 'Garment Tailoring & Quality Inspection',
+          time: 'Pending Next Step',
+          desc: 'Pieces prepared according to chosen length, lining, and zipper specifications.',
+          completed: false,
+        },
+        {
+          title: 'Dispatched with Blue Dart Express',
+          time: 'Expected Tomorrow',
+          desc: `Will be dispatched via Blue Dart Express (AWB: ${awbCode}).`,
+          completed: false,
+        },
+        {
+          title: 'Delivered to Doorstep',
+          time: '3 - 5 Business Days',
+          desc: `Doorstep delivery to ${formData.city}.`,
+          completed: false,
+        },
+      ],
+    }
+
     setOrderId(generatedId)
+    onOrderPlaced(newTrackedOrder)
     setStep('success')
   }
 
@@ -2177,7 +2740,7 @@ function CheckoutModal({
           </span>
           <span className="text-black/30">→</span>
           <span className={step === 'success' ? 'text-emerald-700 font-bold' : 'text-black/40'}>
-            3. Confirmation
+            3. Confirmation & Tracking
           </span>
         </div>
 
@@ -2209,7 +2772,7 @@ function CheckoutModal({
               </div>
 
               <div>
-                <label className="block text-black/60 font-medium mb-1">Email Address *</label>
+                <label className="block text-black/60 font-medium mb-1">Email Address (For Order Tracking) *</label>
                 <input
                   type="email"
                   required
@@ -2371,7 +2934,7 @@ function CheckoutModal({
               </p>
               <h2 className="text-3xl font-serif text-black mb-2">Thank you for your order, {formData.name}!</h2>
               <p className="text-xs text-black/60 mb-6">
-                Order ID: <span className="font-bold text-black font-mono">{orderId}</span> • A confirmation email has been sent to <span className="font-medium text-black">{formData.email}</span>.
+                Order ID: <span className="font-bold text-black font-mono">{orderId}</span> • A confirmation has been sent to <span className="font-medium text-black">{formData.email}</span>.
               </p>
 
               <div className="bg-stone-50 border border-black/10 p-4 text-left mb-6 text-xs space-y-3">
@@ -2381,7 +2944,7 @@ function CheckoutModal({
                 </div>
                 <div className="flex justify-between border-b border-black/10 pb-2">
                   <span className="font-bold uppercase text-black/60">Estimated Delivery:</span>
-                  <span className="text-emerald-700 font-bold">3 - 5 Business Days</span>
+                  <span className="text-emerald-700 font-bold">3 - 5 Business Days (Blue Dart Express)</span>
                 </div>
                 <div>
                   <p className="font-bold uppercase text-black/60 mb-2">Itemized Summary:</p>
@@ -2398,16 +2961,1053 @@ function CheckoutModal({
                 </div>
               </div>
 
+              <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">
+                <button
+                  onClick={() => {
+                    onCompleteOrder()
+                    onClose()
+                    onOpenAccount()
+                  }}
+                  className="bg-black text-white font-bold text-xs tracking-[0.2em] uppercase px-6 py-3.5 hover:bg-stone-800 cursor-pointer shadow-lg flex items-center justify-center gap-2"
+                >
+                  <span>📦 TRACK ORDER IN YOUR ACCOUNT →</span>
+                </button>
+                <button
+                  onClick={() => {
+                    onCompleteOrder()
+                    onClose()
+                  }}
+                  className="border border-black/30 text-black font-bold text-xs tracking-[0.2em] uppercase px-6 py-3.5 hover:bg-stone-50 cursor-pointer"
+                >
+                  CONTINUE SHOPPING
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 15b. AUTHENTICATION MODAL (SIGN IN & REGISTER WITH EMAIL VERIFICATION)
+function AuthModal({
+  isOpen,
+  onClose,
+  onLoginSuccess,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  onLoginSuccess: (user: UserAccount, isNew?: boolean) => void
+}) {
+  const [tab, setTab] = useState<'signin' | 'signup'>('signin')
+  const [signInEmail, setSignInEmail] = useState('priya.sharma@example.com')
+  const [signInPassword, setSignInPassword] = useState('lunar123')
+  const [showPassword, setShowPassword] = useState(false)
+  const [signInError, setSignInError] = useState('')
+
+  // Sign up state
+  const [signUpStep, setSignUpStep] = useState<'form' | 'otp'>('form')
+  const [signUpName, setSignUpName] = useState('')
+  const [signUpEmail, setSignUpEmail] = useState('')
+  const [signUpPhone, setSignUpPhone] = useState('')
+  const [signUpPassword, setSignUpPassword] = useState('')
+  const [otpCode, setOtpCode] = useState('')
+  const [generatedOtp, setGeneratedOtp] = useState('849201')
+  const [otpError, setOtpError] = useState('')
+  const [resendTimer, setResendTimer] = useState(30)
+
+  useEffect(() => {
+    let interval: any
+    if (signUpStep === 'otp' && resendTimer > 0) {
+      interval = setInterval(() => setResendTimer((prev) => prev - 1), 1000)
+    }
+    return () => clearInterval(interval)
+  }, [signUpStep, resendTimer])
+
+  if (!isOpen) return null
+
+  const handleSignIn = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!signInEmail || !signInPassword) {
+      setSignInError('Please provide both email and password.')
+      return
+    }
+    const user: UserAccount = {
+      name: signInEmail.includes('priya') ? 'Priya Sharma' : signInEmail.split('@')[0].toUpperCase(),
+      email: signInEmail,
+      phone: '+91 98765 43210',
+      verified: true,
+    }
+    onLoginSuccess(user, false)
+    onClose()
+  }
+
+  const handleFillDemo = () => {
+    setSignInEmail('priya.sharma@example.com')
+    setSignInPassword('lunar123')
+    setSignInError('')
+  }
+
+  const handleSendOtp = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!signUpName || !signUpEmail || !signUpPassword) {
+      setOtpError('Please fill out all mandatory fields.')
+      return
+    }
+    const randomOtp = Math.floor(100000 + Math.random() * 900000).toString()
+    setGeneratedOtp(randomOtp)
+    setSignUpStep('otp')
+    setResendTimer(30)
+    setOtpError('')
+  }
+
+  const handleVerifyOtpAndRegister = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (otpCode.trim() !== generatedOtp && otpCode.trim() !== '849201') {
+      setOtpError('Invalid verification code. Please check and try again.')
+      return
+    }
+
+    const newUser: UserAccount = {
+      name: signUpName,
+      email: signUpEmail,
+      phone: signUpPhone || '+91 98765 00000',
+      verified: true,
+    }
+    onLoginSuccess(newUser, true)
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white max-w-md w-full border border-black/10 shadow-2xl rounded-sm overflow-hidden animate-slide-down">
+        {/* Header */}
+        <div className="bg-black text-white p-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img src="/lunar-logo.png" alt="Lunar" className="h-8 w-auto object-contain rounded-md" />
+            <div>
+              <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">THE LUNAR CLOTHING</p>
+              <h2 className="text-lg font-serif">Customer Portal & Tracking</h2>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-white/70 hover:text-white text-xl cursor-pointer">
+            ✕
+          </button>
+        </div>
+
+        {/* Tab switch */}
+        <div className="flex border-b border-black/10 text-xs font-bold uppercase tracking-widest bg-stone-50">
+          <button
+            onClick={() => { setTab('signin'); setSignUpStep('form') }}
+            className={`flex-1 py-3 text-center transition-colors cursor-pointer ${
+              tab === 'signin' ? 'bg-white text-black border-b-2 border-black' : 'text-black/50 hover:text-black'
+            }`}
+          >
+            Sign In
+          </button>
+          <button
+            onClick={() => { setTab('signup'); setSignUpStep('form') }}
+            className={`flex-1 py-3 text-center transition-colors cursor-pointer ${
+              tab === 'signup' ? 'bg-white text-black border-b-2 border-black' : 'text-black/50 hover:text-black'
+            }`}
+          >
+            Create Account
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
+          {tab === 'signin' ? (
+            <form onSubmit={handleSignIn} className="space-y-4 text-xs">
+              <div className="bg-amber-50 border border-amber-200 p-3 text-[11px] text-amber-900 rounded-xs flex items-center justify-between">
+                <span>⚡ Test with demo account to view existing orders:</span>
+                <button
+                  type="button"
+                  onClick={handleFillDemo}
+                  className="font-bold underline text-amber-950 hover:text-black cursor-pointer"
+                >
+                  Quick Fill
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-black/60 font-semibold mb-1">Email Address *</label>
+                <input
+                  type="email"
+                  required
+                  value={signInEmail}
+                  onChange={(e) => setSignInEmail(e.target.value)}
+                  placeholder="e.g. priya.sharma@example.com"
+                  className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-black/60 font-semibold">Password *</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="text-[10px] text-black/50 hover:text-black cursor-pointer"
+                  >
+                    {showPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={signInPassword}
+                  onChange={(e) => setSignInPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
+                />
+              </div>
+
+              {signInError && <p className="text-red-600 font-medium">{signInError}</p>}
+
               <button
-                onClick={() => {
-                  onCompleteOrder()
-                  onClose()
-                }}
-                className="bg-black text-white font-bold text-xs tracking-[0.2em] uppercase px-8 py-3.5 hover:bg-stone-800 cursor-pointer"
+                type="submit"
+                className="w-full bg-black text-white font-bold text-xs tracking-[0.2em] uppercase py-3.5 mt-2 hover:bg-stone-800 transition-colors cursor-pointer shadow-md"
               >
-                CONTINUE SHOPPING →
+                SIGN IN TO VIEW ORDERS →
+              </button>
+
+              <div className="text-center pt-2 text-black/50">
+                <span>New to The Lunar Clothing? </span>
+                <button
+                  type="button"
+                  onClick={() => { setTab('signup'); setSignUpStep('form') }}
+                  className="text-black font-bold underline cursor-pointer"
+                >
+                  Register here
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div>
+              {signUpStep === 'form' ? (
+                <form onSubmit={handleSendOtp} className="space-y-3.5 text-xs">
+                  <p className="text-[11px] text-black/60 mb-2">
+                    Create an account to track all your orders, manage custom tailoring options, and get express support.
+                  </p>
+
+                  <div>
+                    <label className="block text-black/60 font-semibold mb-1">Full Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={signUpName}
+                      onChange={(e) => setSignUpName(e.target.value)}
+                      placeholder="e.g. Priya Sharma"
+                      className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-black/60 font-semibold mb-1">Email Address * (Will be verified)</label>
+                    <input
+                      type="email"
+                      required
+                      value={signUpEmail}
+                      onChange={(e) => setSignUpEmail(e.target.value)}
+                      placeholder="e.g. priya.sharma@example.com"
+                      className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-black/60 font-semibold mb-1">Mobile Number (For Courier Updates)</label>
+                    <input
+                      type="tel"
+                      value={signUpPhone}
+                      onChange={(e) => setSignUpPhone(e.target.value)}
+                      placeholder="+91 98765 43210"
+                      className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-black/60 font-semibold mb-1">Create Password *</label>
+                    <input
+                      type="password"
+                      required
+                      value={signUpPassword}
+                      onChange={(e) => setSignUpPassword(e.target.value)}
+                      placeholder="Minimum 6 characters"
+                      className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
+                    />
+                  </div>
+
+                  {otpError && <p className="text-red-600 font-medium">{otpError}</p>}
+
+                  <button
+                    type="submit"
+                    className="w-full bg-black text-white font-bold text-xs tracking-[0.2em] uppercase py-3.5 mt-2 hover:bg-stone-800 transition-colors cursor-pointer shadow-md"
+                  >
+                    CONTINUE TO EMAIL VERIFICATION →
+                  </button>
+
+                  <div className="text-center pt-2 text-black/50">
+                    <span>Already registered? </span>
+                    <button
+                      type="button"
+                      onClick={() => setTab('signin')}
+                      className="text-black font-bold underline cursor-pointer"
+                    >
+                      Sign in
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyOtpAndRegister} className="space-y-4 text-xs">
+                  <div className="text-center py-2">
+                    <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xl mx-auto mb-2 font-bold">
+                      ✉
+                    </div>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-black">Verify Your Email</h3>
+                    <p className="text-black/60 text-[11px] mt-1">
+                      We sent a 6-digit verification code to <span className="font-bold text-black">{signUpEmail}</span>
+                    </p>
+                  </div>
+
+                  {/* Demo OTP auto-paste box */}
+                  <div className="bg-emerald-50 border border-emerald-200 p-3 text-center rounded-xs">
+                    <p className="text-[11px] text-emerald-800 font-medium">Demo verification code sent to your inbox:</p>
+                    <div className="flex items-center justify-center gap-2 mt-1">
+                      <span className="font-mono text-base font-bold tracking-widest text-emerald-900 bg-white px-3 py-1 border border-emerald-300">
+                        {generatedOtp}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setOtpCode(generatedOtp)}
+                        className="text-[10px] uppercase font-bold text-emerald-900 underline cursor-pointer"
+                      >
+                        Auto-Fill Code
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-black/60 font-semibold mb-1">Enter 6-Digit Code *</label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={6}
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value)}
+                      placeholder="e.g. 849201"
+                      className="w-full border border-black/20 p-2.5 text-center font-mono text-lg tracking-[0.3em] font-bold outline-none focus:border-black"
+                    />
+                  </div>
+
+                  {otpError && <p className="text-red-600 font-medium text-center">{otpError}</p>}
+
+                  <button
+                    type="submit"
+                    className="w-full bg-black text-white font-bold text-xs tracking-[0.2em] uppercase py-3.5 hover:bg-stone-800 cursor-pointer shadow-md"
+                  >
+                    VERIFY EMAIL & COMPLETE SIGN UP ✓
+                  </button>
+
+                  <div className="flex justify-between items-center text-[11px] text-black/60 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setSignUpStep('form')}
+                      className="underline hover:text-black cursor-pointer"
+                    >
+                      ← Edit details
+                    </button>
+                    {resendTimer > 0 ? (
+                      <span>Resend code in {resendTimer}s</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const code = Math.floor(100000 + Math.random() * 900000).toString()
+                          setGeneratedOtp(code)
+                          setResendTimer(30)
+                        }}
+                        className="font-bold underline text-black cursor-pointer"
+                      >
+                        Resend Code
+                      </button>
+                    )}
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 15c. ACCOUNT DRAWER (EXISTING ORDERS & LIVE REAL-TIME TRACKING)
+function AccountDrawer({
+  isOpen,
+  onClose,
+  user,
+  orders,
+  onSignOut,
+  onSelectProduct,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  user: UserAccount | null
+  orders: TrackedOrder[]
+  onSignOut: () => void
+  onSelectProduct: (id: number) => void
+}) {
+  const [activeTab, setActiveTab] = useState<'orders' | 'lookup' | 'profile'>('orders')
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(orders[0]?.id || null)
+  const [copiedAwb, setCopiedAwb] = useState<string | null>(null)
+  const [lookupQuery, setLookupQuery] = useState('')
+  const [lookupResult, setLookupResult] = useState<TrackedOrder | null>(null)
+  const [hasSearched, setHasSearched] = useState(false)
+
+  if (!isOpen) return null
+
+  const handleCopyAwb = (awb: string) => {
+    navigator.clipboard.writeText(awb)
+    setCopiedAwb(awb)
+    setTimeout(() => setCopiedAwb(null), 2000)
+  }
+
+  const handleSearchOrder = (e: React.FormEvent) => {
+    e.preventDefault()
+    setHasSearched(true)
+    const cleaned = lookupQuery.trim().toUpperCase()
+    const found = orders.find(
+      (o) => o.id.toUpperCase() === cleaned || o.awb.toUpperCase() === cleaned || o.shippingAddress.phone.includes(cleaned)
+    )
+    setLookupResult(found || null)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-hidden">
+      <div onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-xs animate-fade-in" />
+      <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
+        <div className="w-screen max-w-2xl bg-white shadow-2xl flex flex-col justify-between animate-slide-in-right">
+          {/* Header */}
+          <div className="p-6 border-b border-black/10 bg-stone-950 text-white flex items-center justify-between">
+            <div className="flex items-center gap-3.5">
+              <img src="/lunar-logo.png" alt="Lunar" className="h-9 w-auto object-contain rounded-md" />
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-serif tracking-wider uppercase">{user ? user.name : 'Customer Account'}</h2>
+                  {user?.verified && (
+                    <span className="bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[9px] font-mono px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span>✓</span> Verified Email
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/60 text-xs">{user?.email || 'priya.sharma@example.com'}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {user && (
+                <button
+                  onClick={onSignOut}
+                  className="text-xs text-white/70 hover:text-white underline cursor-pointer tracking-wider uppercase font-semibold"
+                >
+                  Sign Out
+                </button>
+              )}
+              <button onClick={onClose} className="text-white/60 hover:text-white p-1 text-2xl font-light cursor-pointer">
+                ✕
               </button>
             </div>
+          </div>
+
+          {/* Navigation Tabs */}
+          <div className="flex border-b border-black/10 text-xs font-bold uppercase tracking-widest bg-stone-50">
+            <button
+              onClick={() => setActiveTab('orders')}
+              className={`flex-1 py-3.5 text-center transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeTab === 'orders' ? 'bg-white text-black border-b-2 border-black' : 'text-black/50 hover:text-black'
+              }`}
+            >
+              <span>Existing Orders</span>
+              <span className="bg-black text-white text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                {orders.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab('lookup')}
+              className={`flex-1 py-3.5 text-center transition-colors cursor-pointer ${
+                activeTab === 'lookup' ? 'bg-white text-black border-b-2 border-black' : 'text-black/50 hover:text-black'
+              }`}
+            >
+              🔍 Direct AWB Tracker
+            </button>
+            <button
+              onClick={() => setActiveTab('profile')}
+              className={`flex-1 py-3.5 text-center transition-colors cursor-pointer ${
+                activeTab === 'profile' ? 'bg-white text-black border-b-2 border-black' : 'text-black/50 hover:text-black'
+              }`}
+            >
+              Customer Details
+            </button>
+          </div>
+
+          {/* Tab Content Area */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {activeTab === 'orders' && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between pb-2 border-b border-black/5">
+                  <p className="text-xs font-bold tracking-wider uppercase text-black/60">
+                    Showing All Order History ({orders.length})
+                  </p>
+                  <p className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
+                    Live Courier Synchronization Active
+                  </p>
+                </div>
+
+                {orders.map((order) => {
+                  const isExpanded = expandedOrderId === order.id
+                  const isDelivered = order.status === 'Delivered'
+                  const isInTransit = order.status === 'In Transit'
+
+                  return (
+                    <div
+                      key={order.id}
+                      className={`border transition-all ${
+                        isExpanded ? 'border-black shadow-md bg-white' : 'border-black/15 bg-stone-50/50 hover:border-black/40'
+                      }`}
+                    >
+                      {/* Order Summary Header */}
+                      <div
+                        onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
+                        className="p-4 cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 select-none"
+                      >
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-sm text-black">{order.id}</span>
+                            <span
+                              className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
+                                isDelivered
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : isInTransit
+                                  ? 'bg-blue-100 text-blue-900 border border-blue-300'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}
+                            >
+                              {isInTransit && '● '}
+                              {order.status}
+                            </span>
+                            <span className="text-xs text-black/50">• {order.date}</span>
+                          </div>
+                          <p className="text-xs text-black/70 mt-1">
+                            {order.items.length} item(s) • <span className="font-bold text-black">₹{order.total.toLocaleString()}</span> via {order.paymentMethod}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-bold text-black uppercase tracking-wider">
+                            {isExpanded ? 'Hide Details ▲' : 'Track Order ▼'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Expanded Order Details & Tracking Stepper */}
+                      {isExpanded && (
+                        <div className="border-t border-black/10 p-5 space-y-6 bg-white animate-fade-in">
+                          {/* Courier & ETA Pill */}
+                          <div className="bg-stone-100 p-4 border border-black/10 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
+                            <div>
+                              <p className="text-black/50 font-bold uppercase text-[10px] tracking-wider">Courier Service & AWB</p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="font-bold text-black">{order.courier}</span>
+                                <span className="font-mono bg-white px-2 py-0.5 border border-black/20 text-black">
+                                  {order.awb}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyAwb(order.awb)}
+                                  className="text-[10px] font-bold text-black/70 hover:text-black underline cursor-pointer"
+                                >
+                                  {copiedAwb === order.awb ? '✓ Copied' : 'Copy'}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="md:text-right">
+                              <p className="text-black/50 font-bold uppercase text-[10px] tracking-wider">Estimated Delivery</p>
+                              <p className="font-bold text-emerald-800 mt-0.5">{order.estimatedDelivery}</p>
+                            </div>
+                          </div>
+
+                          {/* Visual Step Timeline */}
+                          <div>
+                            <h4 className="text-xs font-bold uppercase tracking-widest text-black mb-4 flex items-center gap-2">
+                              <span>📍 Real-Time Tracking Timeline</span>
+                              <span className="text-[10px] font-normal text-black/50 font-sans">(Live Status)</span>
+                            </h4>
+
+                            <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-black/15">
+                              {order.timeline.map((step, sIdx) => {
+                                return (
+                                  <div key={sIdx} className="relative group">
+                                    {/* Indicator Dot */}
+                                    <div
+                                      className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold transition-all ${
+                                        step.completed
+                                          ? 'bg-black text-white'
+                                          : step.current
+                                          ? 'bg-blue-600 text-white ring-4 ring-blue-100 animate-pulse'
+                                          : 'bg-white border-2 border-black/25 text-black/40'
+                                      }`}
+                                    >
+                                      {step.completed ? '✓' : sIdx + 1}
+                                    </div>
+
+                                    <div>
+                                      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                                        <p
+                                          className={`text-xs font-bold ${
+                                            step.completed || step.current ? 'text-black' : 'text-black/40'
+                                          }`}
+                                        >
+                                          {step.title}
+                                        </p>
+                                        <span className="text-[10px] font-mono text-black/50">{step.time}</span>
+                                      </div>
+                                      <p className="text-[11px] text-black/60 mt-0.5 leading-relaxed">{step.desc}</p>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Items Purchased in this order */}
+                          <div className="border-t border-black/10 pt-4">
+                            <h4 className="text-xs font-bold uppercase tracking-widest text-black mb-3">
+                              Garments In This Order
+                            </h4>
+                            <div className="space-y-3">
+                              {order.items.map((item, iIdx) => (
+                                <div key={iIdx} className="flex gap-3.5 bg-stone-50 p-3 border border-black/10">
+                                  <img
+                                    src={item.image}
+                                    alt={item.name}
+                                    className="w-16 h-20 object-cover border border-black/10 bg-white"
+                                  />
+                                  <div className="flex-1 flex flex-col justify-between text-xs">
+                                    <div>
+                                      <p className="font-bold text-black">{item.name}</p>
+                                      <div className="flex gap-2 flex-wrap text-[11px] text-black/60 mt-1">
+                                        <span className="bg-white border border-black/10 px-1.5 py-0.5">Size: {item.size}</span>
+                                        {item.lining && <span className="bg-white border border-black/10 px-1.5 py-0.5">{item.lining}</span>}
+                                        {item.zip && item.zip !== 'None' && (
+                                          <span className="bg-white border border-black/10 px-1.5 py-0.5">{item.zip}</span>
+                                        )}
+                                        {item.length && <span className="bg-white border border-black/10 px-1.5 py-0.5">{item.length}</span>}
+                                      </div>
+                                    </div>
+                                    <div className="flex justify-between items-center mt-2">
+                                      <span className="text-black/60">Qty: {item.quantity}</span>
+                                      <span className="font-bold text-black">₹{(item.price * item.quantity).toLocaleString()}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Shipping Destination & Actions */}
+                          <div className="border-t border-black/10 pt-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-xs">
+                            <div>
+                              <p className="font-bold uppercase text-[10px] tracking-wider text-black/50">Delivery Address</p>
+                              <p className="text-black font-medium mt-0.5">
+                                {order.shippingAddress.name} • {order.shippingAddress.address}, {order.shippingAddress.city} {order.shippingAddress.pincode}
+                              </p>
+                            </div>
+
+                            <a
+                              href={`https://wa.me/919876543210?text=Hello%20The%20Lunar%20Clothing,%20I%20need%20assistance%20tracking%20my%20order%20${order.id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 bg-emerald-700 text-white px-3.5 py-2 text-[11px] font-bold uppercase tracking-wider hover:bg-emerald-800 transition-colors cursor-pointer"
+                            >
+                              <span>WhatsApp Support 💬</span>
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {activeTab === 'lookup' && (
+              <div className="space-y-6">
+                <div className="bg-stone-50 border border-black/10 p-5">
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-black mb-1">Direct Courier & Order Lookup</h3>
+                  <p className="text-xs text-black/60 mb-4">
+                    Enter any Order ID (e.g. <span className="font-mono font-bold text-black">LUNAR-892410</span>) or Courier AWB number to fetch instant live tracking records.
+                  </p>
+
+                  <form onSubmit={handleSearchOrder} className="flex gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={lookupQuery}
+                      onChange={(e) => setLookupQuery(e.target.value)}
+                      placeholder="e.g. LUNAR-892410 or BD8912401IN"
+                      className="flex-1 border border-black/20 bg-white p-2.5 text-xs font-mono uppercase tracking-wider outline-none focus:border-black"
+                    />
+                    <button
+                      type="submit"
+                      className="bg-black text-white text-xs font-bold uppercase tracking-widest px-5 py-2.5 hover:bg-stone-800 cursor-pointer"
+                    >
+                      TRACK →
+                    </button>
+                  </form>
+                </div>
+
+                {hasSearched && (
+                  <div>
+                    {lookupResult ? (
+                      <div className="border border-black p-5 bg-white space-y-4 animate-fade-in">
+                        <div className="flex justify-between items-center border-b border-black/10 pb-3">
+                          <div>
+                            <span className="font-mono font-bold text-base text-black">{lookupResult.id}</span>
+                            <p className="text-xs text-black/50">Placed on {lookupResult.date}</p>
+                          </div>
+                          <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase">
+                            {lookupResult.status}
+                          </span>
+                        </div>
+
+                        <div className="bg-stone-50 p-3 text-xs flex justify-between">
+                          <span>Courier: <strong className="text-black">{lookupResult.courier}</strong> (AWB: {lookupResult.awb})</span>
+                          <span className="font-bold text-emerald-700">{lookupResult.estimatedDelivery}</span>
+                        </div>
+
+                        {/* Timeline */}
+                        <div className="pt-2 pl-4 space-y-4 border-l-2 border-black/20">
+                          {lookupResult.timeline.map((step, idx) => (
+                            <div key={idx} className="relative">
+                              <span
+                                className={`absolute -left-6 top-1 w-3.5 h-3.5 rounded-full ${
+                                  step.completed ? 'bg-black' : step.current ? 'bg-blue-600 ring-2 ring-blue-200' : 'bg-stone-300'
+                                }`}
+                              />
+                              <p className="text-xs font-bold text-black">{step.title}</p>
+                              <p className="text-[11px] text-black/60">{step.desc}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-10 text-black/50 border border-dashed border-black/20 p-6">
+                        <p className="text-base font-serif text-black mb-1">No matching order found</p>
+                        <p className="text-xs">Please verify your order reference number or mobile number and try again.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'profile' && (
+              <div className="space-y-6 text-xs">
+                <div className="bg-stone-50 border border-black/10 p-5 space-y-4">
+                  <div className="flex justify-between items-center border-b border-black/10 pb-3">
+                    <h3 className="font-bold uppercase tracking-wider text-black">Account Profile</h3>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-xs">
+                      ✓ Email Verified
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-black/50 uppercase text-[10px] font-bold">Registered Name</p>
+                      <p className="font-bold text-black text-sm">{user?.name || 'Priya Sharma'}</p>
+                    </div>
+                    <div>
+                      <p className="text-black/50 uppercase text-[10px] font-bold">Email Address</p>
+                      <p className="font-bold text-black text-sm">{user?.email || 'priya.sharma@example.com'}</p>
+                    </div>
+                    <div>
+                      <p className="text-black/50 uppercase text-[10px] font-bold">Phone Number</p>
+                      <p className="font-bold text-black text-sm">{user?.phone || '+91 98765 43210'}</p>
+                    </div>
+                    <div>
+                      <p className="text-black/50 uppercase text-[10px] font-bold">Default Delivery City</p>
+                      <p className="font-bold text-black text-sm">Hyderabad, Telangana (500033)</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-stone-50 border border-black/10 p-5">
+                  <h3 className="font-bold uppercase tracking-wider text-black mb-2">Saved Delivery Address</h3>
+                  <p className="text-black/80 font-medium leading-relaxed">
+                    Flat 402, Sunshine Heights, Road No. 36, Jubilee Hills,<br />
+                    Hyderabad, Telangana — 500033<br />
+                    Phone: +91 98765 43210
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 15d. ABOUT BRAND MODAL
+function AboutModal({
+  isOpen,
+  onClose,
+  onShopClick,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  onShopClick: () => void
+}) {
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white max-w-2xl w-full border border-black/10 shadow-2xl rounded-sm overflow-hidden animate-slide-down my-8">
+        <div className="bg-black text-white p-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img src="/lunar-logo.png" alt="Lunar" className="h-8 w-auto object-contain rounded-md" />
+            <div>
+              <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">THE LUNAR CLOTHING</p>
+              <h2 className="text-lg font-serif">About Our Studio & Craft</h2>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-white/70 hover:text-white text-xl cursor-pointer">
+            ✕
+          </button>
+        </div>
+
+        <div className="p-6 md:p-8 space-y-6 text-xs text-black/80 leading-relaxed">
+          <div>
+            <span className="text-[10px] font-mono font-bold tracking-[0.2em] uppercase text-amber-800 bg-amber-50 px-2 py-0.5 rounded-xs">
+              HERITAGE & COMFORT
+            </span>
+            <h3 className="text-2xl font-serif text-black mt-2 mb-3">
+              Thoughtfully Handcrafted For Weightless Everyday Living.
+            </h3>
+            <p className="text-sm font-light text-black/70 leading-relaxed">
+              The Lunar Clothing was born out of a desire for effortless silhouettes made from 100% pure breathable cotton. Each piece is crafted in India, celebrating heritage block print traditions like Kalamkari, luxurious Mul Chanderi silks, and soft woven textures that elevate everyday lounging and celebratory gatherings.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+            <div className="border border-black/10 p-4 bg-stone-50">
+              <div className="text-xl mb-1">🌿</div>
+              <h4 className="font-bold text-black uppercase tracking-wider mb-1">100% Pure Cotton</h4>
+              <p className="text-[11px] text-black/60 leading-normal">
+                Airy, skin-friendly fabrics pre-shrunk for zero post-wash surprises.
+              </p>
+            </div>
+
+            <div className="border border-black/10 p-4 bg-stone-50">
+              <div className="text-xl mb-1">👗</div>
+              <h4 className="font-bold text-black uppercase tracking-wider mb-1">Functional Pockets</h4>
+              <p className="text-[11px] text-black/60 leading-normal">
+                Deep utility side pockets on all maxis with custom maternity feeding zips available.
+              </p>
+            </div>
+
+            <div className="border border-black/10 p-4 bg-stone-50">
+              <div className="text-xl mb-1">🎨</div>
+              <h4 className="font-bold text-black uppercase tracking-wider mb-1">Artisanal Craft</h4>
+              <p className="text-[11px] text-black/60 leading-normal">
+                Ethically hand-printed Kalamkari & festive Mul Chanderi supporting Indian artisans.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-stone-900 text-white p-5 rounded-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div>
+              <p className="font-bold uppercase tracking-wider text-sm">Experience The Lunar Flavour</p>
+              <p className="text-white/60 text-[11px]">Free shipping across India on orders over ₹999.</p>
+            </div>
+            <button
+              onClick={() => {
+                onClose()
+                onShopClick()
+              }}
+              className="bg-white text-black font-bold text-xs tracking-widest uppercase px-6 py-3 hover:bg-stone-200 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              EXPLORE COLLECTIONS →
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 15e. CONTACT & CARE MODAL
+function ContactModal({
+  isOpen,
+  onClose,
+  onSuccessMessage,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  onSuccessMessage: (msg: string) => void
+}) {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [subject, setSubject] = useState('Order Tracking Inquiry')
+  const [message, setMessage] = useState('')
+  const [submitted, setSubmitted] = useState(false)
+
+  if (!isOpen) return null
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitted(true)
+    onSuccessMessage('Thank you! Your message has been sent to Lunar Customer Care.')
+    setTimeout(() => {
+      setSubmitted(false)
+      onClose()
+    }, 1800)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white max-w-xl w-full border border-black/10 shadow-2xl rounded-sm overflow-hidden animate-slide-down my-8">
+        <div className="bg-black text-white p-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img src="/lunar-logo.png" alt="Lunar" className="h-8 w-auto object-contain rounded-md" />
+            <div>
+              <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">THE LUNAR CLOTHING</p>
+              <h2 className="text-lg font-serif">Contact Customer Care</h2>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-white/70 hover:text-white text-xl cursor-pointer">
+            ✕
+          </button>
+        </div>
+
+        <div className="p-6 md:p-8 space-y-6 text-xs">
+          {/* Direct channels */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <a
+              href="https://wa.me/919876543210?text=Hello%20The%20Lunar%20Clothing,%20I%20have%20an%20inquiry%20regarding%20my%20order."
+              target="_blank"
+              rel="noreferrer"
+              className="border border-emerald-300 bg-emerald-50/70 p-3.5 flex items-center gap-3 hover:bg-emerald-100 transition-colors cursor-pointer group"
+            >
+              <span className="text-2xl">💬</span>
+              <div>
+                <p className="font-bold text-emerald-950 uppercase tracking-wider text-[11px]">Instant WhatsApp</p>
+                <p className="text-emerald-800 text-[11px] font-mono font-semibold">+91 98765 43210</p>
+              </div>
+            </a>
+
+            <div className="border border-black/10 bg-stone-50 p-3.5 flex items-center gap-3">
+              <span className="text-2xl">✉</span>
+              <div>
+                <p className="font-bold text-black uppercase tracking-wider text-[11px]">Email Support</p>
+                <p className="text-black/70 text-[11px] font-mono">care@thelunarclothing.com</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-stone-50 border border-black/10 p-3 text-[11px] text-black/70 flex justify-between items-center">
+            <span>📍 Studio: Jubilee Hills, Hyderabad & Jaipur</span>
+            <span className="font-semibold text-black">Mon–Sat: 10AM – 7PM IST</span>
+          </div>
+
+          {/* Form */}
+          {submitted ? (
+            <div className="text-center py-8 bg-emerald-50 border border-emerald-200 p-6">
+              <span className="text-3xl">✓</span>
+              <h4 className="text-base font-bold text-emerald-950 mt-2">Message Sent Successfully!</h4>
+              <p className="text-emerald-800 text-[11px] mt-1">Our support executive will get back to you shortly.</p>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-3.5">
+              <h4 className="font-bold uppercase tracking-wider text-black border-b border-black/10 pb-2">
+                Send Us a Note
+              </h4>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-black/60 font-semibold mb-1">Your Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Priya Sharma"
+                    className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-black/60 font-semibold mb-1">Phone / WhatsApp Number</label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+91 98765 43210"
+                    className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-black/60 font-semibold mb-1">Email Address *</label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="priya.sharma@example.com"
+                  className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-black/60 font-semibold mb-1">Subject</label>
+                <select
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs bg-white cursor-pointer"
+                >
+                  <option value="Order Tracking Inquiry">Order Tracking & Courier Delivery</option>
+                  <option value="Custom Tailoring / Sizing">Custom Length, Feeding Zips, or Lining</option>
+                  <option value="Exchange or Return">Exchange & Returns Support</option>
+                  <option value="Wholesale or Collaboration">Artisan Collaboration / Bulk Orders</option>
+                  <option value="General Inquiry">General Inquiry</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-black/60 font-semibold mb-1">Your Message *</label>
+                <textarea
+                  required
+                  rows={3}
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  placeholder="How can we assist you today?"
+                  className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-black text-white font-bold text-xs tracking-[0.2em] uppercase py-3.5 hover:bg-stone-800 transition-colors cursor-pointer shadow-md"
+              >
+                SEND MESSAGE →
+              </button>
+            </form>
           )}
         </div>
       </div>
@@ -2597,7 +4197,10 @@ function Footer() {
       <div className="max-w-screen-2xl mx-auto px-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16">
           <div className="md:col-span-2">
-            <h3 className="text-2xl md:text-3xl font-bold tracking-[0.2em] font-sans uppercase mb-4">THE LUNAR CLOTHING</h3>
+            <div className="flex items-center gap-3.5 mb-4">
+              <img src="/lunar-logo.png" alt="Lunar" className="h-9 w-auto object-contain rounded-md" />
+              <h3 className="text-2xl md:text-3xl font-bold tracking-[0.2em] font-sans uppercase">THE LUNAR CLOTHING</h3>
+            </div>
             <p className="text-white/60 text-sm max-w-sm mb-6 leading-relaxed">
               Handcrafted 100% soft cotton maxis, artisanal Kalamkari block prints, and Mul Chanderi dresses with functional side pockets.
             </p>
@@ -2655,6 +4258,15 @@ export default function App() {
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null)
   
+  // User Authentication & Order Tracking State
+  const [user, setUser] = useState<UserAccount | null>(null)
+  const [orders, setOrders] = useState<TrackedOrder[]>(INITIAL_ORDERS)
+  const [isAuthOpen, setIsAuthOpen] = useState(false)
+  const [isAccountOpen, setIsAccountOpen] = useState(false)
+  const [isAboutOpen, setIsAboutOpen] = useState(false)
+  const [isContactOpen, setIsContactOpen] = useState(false)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [isWishlistOpen, setIsWishlistOpen] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
@@ -2667,13 +4279,43 @@ export default function App() {
     {
       product: PRODUCTS[0],
       selectedColor: PRODUCTS[0].colors[0],
-      selectedSize: 'S',
+      selectedSize: 'M',
       selectedLining: 'No Lining',
       selectedZip: 'None',
       selectedLength: '44 inch',
       quantity: 1,
     },
   ])
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg)
+    setTimeout(() => setToastMessage(null), 4000)
+  }
+
+  const handleLoginSuccess = (loggedInUser: UserAccount, isNew?: boolean) => {
+    setUser(loggedInUser)
+    showToast(isNew ? `Account created! Email verified for ${loggedInUser.name}.` : `Welcome back, ${loggedInUser.name}!`)
+    setIsAccountOpen(true)
+  }
+
+  const handleSignOut = () => {
+    setUser(null)
+    setIsAccountOpen(false)
+    showToast('Signed out successfully.')
+  }
+
+  const handleOrderPlaced = (newOrder: TrackedOrder) => {
+    setOrders((prev) => [newOrder, ...prev])
+    if (!user) {
+      setUser({
+        name: newOrder.shippingAddress.name,
+        email: 'priya.sharma@example.com',
+        phone: newOrder.shippingAddress.phone,
+        verified: true,
+      })
+    }
+    showToast(`Order ${newOrder.id} confirmed! Tracking is now active.`)
+  }
 
   const handleToggleWishlist = (id: number) => {
     setWishlist((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
@@ -2773,16 +4415,24 @@ export default function App() {
   const selectedProduct = PRODUCTS.find((p) => p.id === selectedProductId) || PRODUCTS[0]
 
   return (
-    <div className="min-h-screen bg-white text-black font-sans antialiased">
+    <div className="min-h-screen bg-stone-50/20 text-black font-sans antialiased relative selection:bg-rose-100 selection:text-black">
+      {/* Dynamic Ambient Background & Interactive Breeze Simulation */}
+      <InteractiveBackground />
+
       {showAnnouncement && <AnnouncementBar onDismiss={() => setShowAnnouncement(false)} />}
 
       <Navigation
         cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
         wishlistCount={wishlist.length}
+        user={user}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenWishlist={() => setIsWishlistOpen(true)}
         onOpenSearch={() => setIsSearchOpen(true)}
         onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
+        onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenAccount={() => setIsAccountOpen(true)}
+        onOpenAbout={() => setIsAboutOpen(true)}
+        onOpenContact={() => setIsContactOpen(true)}
         onNavigate={handleNavigate}
         currentCategory={categoryFilter}
       />
@@ -2836,6 +4486,11 @@ export default function App() {
         onNavigate={handleNavigate}
         onOpenWishlist={() => setIsWishlistOpen(true)}
         onOpenSearch={() => setIsSearchOpen(true)}
+        onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenAccount={() => setIsAccountOpen(true)}
+        onOpenAbout={() => setIsAboutOpen(true)}
+        onOpenContact={() => setIsContactOpen(true)}
+        user={user}
         wishlistCount={wishlist.length}
       />
 
@@ -2868,10 +4523,47 @@ export default function App() {
         cart={cart}
         subtotal={rawSubtotal}
         discountAmount={0}
+        user={user}
+        onOrderPlaced={handleOrderPlaced}
+        onOpenAccount={() => setIsAccountOpen(true)}
         onCompleteOrder={() => {
           setCart([])
           setIsCheckoutOpen(false)
         }}
+      />
+
+      {/* Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
+      />
+
+      {/* Account & Real-Time Order Tracking Drawer */}
+      <AccountDrawer
+        isOpen={isAccountOpen}
+        onClose={() => setIsAccountOpen(false)}
+        user={user}
+        orders={orders}
+        onSignOut={handleSignOut}
+        onSelectProduct={handleSelectProduct}
+      />
+
+      {/* About Brand Modal */}
+      <AboutModal
+        isOpen={isAboutOpen}
+        onClose={() => setIsAboutOpen(false)}
+        onShopClick={() => {
+          setIsAboutOpen(false)
+          handleNavigate('catalog', 'all')
+        }}
+      />
+
+      {/* Contact Customer Care Modal */}
+      <ContactModal
+        isOpen={isContactOpen}
+        onClose={() => setIsContactOpen(false)}
+        onSuccessMessage={(msg) => showToast(msg)}
       />
 
       {/* Interactive Search Overlay */}
@@ -2880,6 +4572,14 @@ export default function App() {
         onClose={() => setIsSearchOpen(false)}
         onSelectProduct={handleSelectProduct}
       />
+
+      {/* Floating Status Notification Toast */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-black text-white px-5 py-3 rounded-xs shadow-2xl border border-white/20 text-xs font-semibold tracking-wider uppercase flex items-center gap-3 animate-slide-down">
+          <span className="text-emerald-400 font-bold">✓</span>
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   )
 }

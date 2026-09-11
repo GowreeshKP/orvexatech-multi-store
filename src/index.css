@@ -133,5 +133,134 @@ body {
   animation-play-state: paused;
 }
 
+/* --- THE LUNAR CLOTHING LUXURY AMBIENT BACKGROUND ANIMATIONS --- */
+@keyframes orbFloat1 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(60px, -40px) scale(1.15);
+  }
+  66% {
+    transform: translate(-40px, 50px) scale(0.92);
+  }
+}
+
+@keyframes orbFloat2 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  40% {
+    transform: translate(-70px, -50px) scale(1.12);
+  }
+  75% {
+    transform: translate(50px, 40px) scale(0.95);
+  }
+}
+
+@keyframes orbFloat3 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  50% {
+    transform: translate(40px, 60px) scale(1.2);
+  }
+}
+
+@keyframes petalDrift {
+  0% {
+    transform: translateY(-5vh) translateX(0) rotate(0deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.65;
+  }
+  85% {
+    opacity: 0.65;
+  }
+  100% {
+    transform: translateY(105vh) translateX(120px) rotate(360deg);
+    opacity: 0;
+  }
+}
+
+@keyframes dragonflyFlutter {
+  0% {
+    transform: translate(-10vw, 30vh) rotate(5deg) scale(0.85);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.45;
+  }
+  50% {
+    transform: translate(45vw, 20vh) rotate(-8deg) scale(1);
+    opacity: 0.55;
+  }
+  90% {
+    opacity: 0.45;
+  }
+  100% {
+    transform: translate(110vw, 40vh) rotate(8deg) scale(0.85);
+    opacity: 0;
+  }
+}
+
+@keyframes dragonflyFlutter2 {
+  0% {
+    transform: translate(110vw, 70vh) rotate(-15deg) scale(0.9);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.4;
+  }
+  60% {
+    transform: translate(40vw, 55vh) rotate(12deg) scale(1.05);
+    opacity: 0.5;
+  }
+  85% {
+    opacity: 0.4;
+  }
+  100% {
+    transform: translate(-15vw, 75vh) rotate(-5deg) scale(0.9);
+    opacity: 0;
+  }
+}
+
+@keyframes wingFlap {
+  0%, 100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.2);
+  }
+}
+
+.animate-orb-1 {
+  animation: orbFloat1 24s ease-in-out infinite;
+}
+
+.animate-orb-2 {
+  animation: orbFloat2 28s ease-in-out infinite;
+}
+
+.animate-orb-3 {
+  animation: orbFloat3 32s ease-in-out infinite;
+}
+
+.animate-dragonfly-1 {
+  animation: dragonflyFlutter 36s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-dragonfly-2 {
+  animation: dragonflyFlutter2 42s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-delay: 18s;
+}
+
+.animate-wing {
+  animation: wingFlap 0.15s ease-in-out infinite;
+  transform-origin: center;
+}
+
+
 
 
