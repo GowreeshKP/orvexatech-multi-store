@@ -3502,6 +3502,7 @@ function AccountDrawer({
   onSignOut: () => void
   onSelectProduct: (id: number) => void
 }) {
+  const switchLayer = useSwitchLayer()
   const [activeTab, setActiveTab] = useState<'orders' | 'lookup' | 'profile'>('orders')
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(orders[0]?.id || null)
   const [copiedAwb, setCopiedAwb] = useState<string | null>(null)
@@ -3561,6 +3562,23 @@ function AccountDrawer({
                 ✕
               </button>
             </div>
+          </div>
+
+          {/* Quick Platform Admin Switcher Banner */}
+          <div className="bg-gradient-to-r from-violet-950 via-indigo-950 to-stone-950 text-white px-6 py-2.5 flex items-center justify-between text-xs border-b border-white/10">
+            <span className="flex items-center gap-2 text-violet-200">
+              <span>👑</span>
+              <span className="font-semibold">Looking for Orvexa Multi-Tenant Platform Super Admin?</span>
+            </span>
+            <button
+              onClick={() => {
+                onClose()
+                switchLayer('admin')
+              }}
+              className="bg-violet-600 hover:bg-violet-500 text-white font-bold text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-xs cursor-pointer shadow-md transition-all flex items-center gap-1"
+            >
+              <span>Open Admin Console →</span>
+            </button>
           </div>
 
           {/* Navigation Tabs */}
