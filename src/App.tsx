@@ -1,4 +1,10 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
+import DashboardApp from './layers/DashboardApp'
+import AdminApp from './layers/AdminApp'
+import { useApplicationLayer, useTenant } from './context/TenantContext'
+import { mockStore } from './api/mock-store'
+import { MOCK_TENANTS } from './data/mock-tenants'
+import type { TenantConfig } from './types/tenant'
 
 // --- THE LUNAR CLOTHING OFFICIAL PRODUCT DATASET ---
 export interface Product {
@@ -757,18 +763,69 @@ function InteractiveBackground() {
   )
 }
 
-// 1. Announcement Bar with Electric Blue Moving Marquee Ticker
-function AnnouncementBar({ onDismiss }: { onDismiss: () => void }) {
-  const tickerItems = [
-    'THE LUNAR CLOTHING • ELEGANT COTTON MAXIS & CHANDERI DRESSES',
-    'FREE SHIPPING IN INDIA OVER ₹999',
-    'USE CODE: LUNAR15 FOR 15% OFF YOUR ORDER',
-    '100% PURE BREATHABLE COTTON • FUNCTIONAL POCKETS',
-    'THE LUNAR CLOTHING • ELEGANT COTTON MAXIS & CHANDERI DRESSES',
-    'FREE SHIPPING IN INDIA OVER ₹999',
-    'USE CODE: LUNAR15 FOR 15% OFF YOUR ORDER',
-    '100% PURE BREATHABLE COTTON • FUNCTIONAL POCKETS',
-  ]
+// --- DYNAMIC TENANT BRAND LOGO COMPONENT ---
+function BrandLogo({
+  tenant,
+  className,
+  isWhiteText,
+}: {
+  tenant?: TenantConfig | null
+  className?: string
+  isWhiteText?: boolean
+}) {
+  if (tenant?.logo || tenant?.theme?.logoUrl) {
+    return (
+      <img
+        src={tenant.logo || tenant.theme.logoUrl}
+        alt={tenant.brandName}
+        className={className || "h-10 md:h-11 w-auto object-contain rounded-sm shadow-xs"}
+      />
+    )
+  }
+
+  const initial = (tenant?.brandName || 'Lunar').charAt(0).toUpperCase()
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-stone-800 to-black text-white flex items-center justify-center font-bold text-xs shadow-sm border border-white/20">
+        {initial}
+      </div>
+      <span
+        className={`font-serif text-lg md:text-xl font-bold uppercase tracking-wider ${
+          isWhiteText ? 'text-white' : 'text-black'
+        }`}
+      >
+        {tenant?.brandName || 'The Lunar Clothing'}
+      </span>
+    </div>
+  )
+}
+
+// 1. Announcement Bar with Dynamic Moving Marquee Ticker
+function AnnouncementBar({
+  tenant,
+  onDismiss,
+}: {
+  tenant?: TenantConfig | null
+  onDismiss: () => void
+}) {
+  const brandName = tenant?.brandName || 'The Lunar Clothing'
+  const customMessages = tenant?.theme?.announcementMessages
+
+  const tickerItems = useMemo(() => {
+    if (customMessages && customMessages.length > 0) {
+      return [...customMessages, ...customMessages]
+    }
+    return [
+      `${brandName.toUpperCase()} • EXCLUSIVE ARTISANAL ONLINE COLLECTION`,
+      'FREE SHIPPING IN INDIA OVER ₹999',
+      `USE CODE: ${(tenant?.slug || 'LUNAR').toUpperCase()}10 FOR 10% OFF`,
+      '100% PURE BREATHABLE FABRICS • FUNCTIONAL UTILITY',
+      `${brandName.toUpperCase()} • EXCLUSIVE ARTISANAL ONLINE COLLECTION`,
+      'FREE SHIPPING IN INDIA OVER ₹999',
+      `USE CODE: ${(tenant?.slug || 'LUNAR').toUpperCase()}10 FOR 10% OFF`,
+      '100% PURE BREATHABLE FABRICS • FUNCTIONAL UTILITY',
+    ]
+  }, [tenant, customMessages, brandName])
 
   return (
     <div className="bg-[#0055FF] text-white py-2.5 relative overflow-hidden flex items-center font-sans text-[11px] font-bold tracking-[0.2em] uppercase select-none z-50 shadow-md">
@@ -794,6 +851,8 @@ function AnnouncementBar({ onDismiss }: { onDismiss: () => void }) {
 
 // 2. Navigation Header
 function Navigation({
+  tenant,
+  products = PRODUCTS,
   cartCount,
   wishlistCount,
   user,
@@ -808,6 +867,8 @@ function Navigation({
   onNavigate,
   currentCategory,
 }: {
+  tenant?: TenantConfig | null
+  products?: Product[]
   cartCount: number
   wishlistCount: number
   user: UserAccount | null
@@ -823,6 +884,21 @@ function Navigation({
   currentCategory: string
 }) {
   const [megaOpen, setMegaOpen] = useState(false)
+
+  // Derive unique categories from products
+  const categoryList = useMemo(() => {
+    return Array.from(new Set(products.map((p) => p.category)))
+  }, [products])
+
+  const formatCatName = (cat: string) => {
+    if (cat === 'maxis') return 'Kurtas & Maxis'
+    if (cat === 'dresses') return 'Sarees & Dresses'
+    if (cat === 'kalamkari') return 'Artisanal Prints & Stoles'
+    if (cat === 'handloom') return 'Handloom Weaves'
+    return cat.charAt(0).toUpperCase() + cat.slice(1)
+  }
+
+  const featuredProduct = products[0] || null
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-black/8 transition-all">
@@ -843,13 +919,9 @@ function Navigation({
           <button
             onClick={() => onNavigate('home')}
             className="flex items-center hover:opacity-85 transition-opacity cursor-pointer text-left py-0.5"
-            aria-label="The Lunar Clothing Home"
+            aria-label={`${tenant?.brandName || 'Brand'} Home`}
           >
-            <img
-              src="/lunar-logo.png"
-              alt="The Lunar Clothing"
-              className="h-10 md:h-11 w-auto object-contain rounded-sm shadow-xs"
-            />
+            <BrandLogo tenant={tenant} />
           </button>
 
           {/* Desktop Nav Links */}
@@ -872,87 +944,61 @@ function Navigation({
               {/* SHOP MEGA MENU */}
               {megaOpen && (
                 <div className="absolute top-full left-0 w-[840px] bg-white border border-black/10 shadow-2xl p-8 grid grid-cols-4 gap-8 z-50 normal-case tracking-normal animate-slide-down">
-                  <div>
-                    <p className="text-xs font-bold tracking-widest uppercase text-black/40 mb-4">Cotton Maxis</p>
-                    <ul className="space-y-2.5 text-sm text-black/80 font-normal">
-                      <li>
-                        <button onClick={() => { setMegaOpen(false); onNavigate('catalog', 'maxis') }} className="hover:font-semibold flex items-center justify-between w-full cursor-pointer">
-                          <span>Yellow Petal Cotton Maxi</span>
-                          <span className="text-[9px] bg-black text-white px-1.5 py-0.5 font-mono">POPULAR</span>
-                        </button>
-                      </li>
-                      <li>
-                        <button onClick={() => { setMegaOpen(false); onNavigate('catalog', 'maxis') }} className="hover:font-semibold flex items-center justify-between w-full cursor-pointer">
-                          <span>Teal Floral Cotton Maxi</span>
-                        </button>
-                      </li>
-                      <li>
-                        <button onClick={() => { setMegaOpen(false); onNavigate('catalog', 'maxis') }} className="hover:font-semibold flex items-center justify-between w-full cursor-pointer">
-                          <span>Dark Violet Cotton Maxi</span>
-                        </button>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-bold tracking-widest uppercase text-black/40 mb-4">Special Collections</p>
-                    <ul className="space-y-2.5 text-sm text-black/80 font-normal">
-                      <li>
-                        <button onClick={() => { setMegaOpen(false); onNavigate('catalog', 'dresses') }} className="hover:font-semibold cursor-pointer">
-                          Mul Chanderi Silk Dresses
-                        </button>
-                      </li>
-                      <li>
-                        <button onClick={() => { setMegaOpen(false); onNavigate('catalog', 'kalamkari') }} className="hover:font-semibold cursor-pointer">
-                          Kalamkari Block Print
-                        </button>
-                      </li>
-                      <li>
-                        <button onClick={() => { setMegaOpen(false); onNavigate('catalog', 'handloom') }} className="hover:font-semibold cursor-pointer">
-                          Handloom Cotton Maxis
-                        </button>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-bold tracking-widest uppercase text-black/40 mb-4">Craft & Quality</p>
-                    <ul className="space-y-2.5 text-sm text-black/80 font-normal">
-                      <li>
-                        <button onClick={() => { setMegaOpen(false); onNavigate('catalog', 'all') }} className="hover:font-semibold cursor-pointer">
-                          Attached Utility Pockets
-                        </button>
-                      </li>
-                      <li>
-                        <button onClick={() => { setMegaOpen(false); onNavigate('catalog', 'all') }} className="hover:font-semibold cursor-pointer">
-                          Side Tie Waist Ropes
-                        </button>
-                      </li>
-                      <li>
-                        <button onClick={() => { setMegaOpen(false); onNavigate('catalog', 'all') }} className="hover:font-semibold cursor-pointer">
-                          100% Breathable Cotton
-                        </button>
-                      </li>
-                    </ul>
-                  </div>
+                  {categoryList.slice(0, 3).map((cat) => {
+                    const catProducts = products.filter((p) => p.category === cat)
+                    return (
+                      <div key={cat}>
+                        <p className="text-xs font-bold tracking-widest uppercase text-black/40 mb-4">
+                          {formatCatName(cat)}
+                        </p>
+                        <ul className="space-y-2.5 text-sm text-black/80 font-normal">
+                          {catProducts.slice(0, 3).map((p) => (
+                            <li key={p.id}>
+                              <button
+                                onClick={() => {
+                                  setMegaOpen(false)
+                                  onNavigate('catalog', cat)
+                                }}
+                                className="hover:font-semibold flex items-center justify-between w-full cursor-pointer text-left"
+                              >
+                                <span className="truncate pr-2">{p.name}</span>
+                                {p.badge && (
+                                  <span className="text-[9px] bg-black text-white px-1.5 py-0.5 font-mono flex-shrink-0">
+                                    {p.badge.toUpperCase()}
+                                  </span>
+                                )}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )
+                  })}
 
                   <div className="bg-stone-100 p-4 relative group/card overflow-hidden">
-                    <img
-                      src="https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243"
-                      alt="Lunar Clothing Feature"
-                      className="absolute inset-0 w-full h-full object-cover opacity-85 group-hover/card:scale-105 transition-transform duration-500"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-                    <div className="relative h-full flex flex-col justify-end text-white">
-                      <p className="text-[10px] tracking-widest uppercase font-bold text-white/70">SIGNATURE COLLECTION</p>
-                      <p className="text-base font-serif leading-tight mb-2">Soft Cotton Maxi Series</p>
-                      <button
-                        onClick={() => { setMegaOpen(false); onNavigate('catalog', 'maxis') }}
-                        className="text-xs font-semibold uppercase tracking-widest underline underline-offset-4 cursor-pointer"
-                      >
-                        Shop Cotton Maxis →
-                      </button>
-                    </div>
+                    {featuredProduct && (
+                      <>
+                        <img
+                          src={featuredProduct.imgMain}
+                          alt={featuredProduct.name}
+                          className="absolute inset-0 w-full h-full object-cover opacity-85 group-hover/card:scale-105 transition-transform duration-500"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+                        <div className="relative h-full flex flex-col justify-end text-white">
+                          <p className="text-[10px] tracking-widest uppercase font-bold text-white/70">SIGNATURE PIECE</p>
+                          <p className="text-base font-serif leading-tight mb-2 truncate">{featuredProduct.name}</p>
+                          <button
+                            onClick={() => {
+                              setMegaOpen(false)
+                              onNavigate('catalog', 'all')
+                            }}
+                            className="text-xs font-semibold uppercase tracking-widest underline underline-offset-4 cursor-pointer"
+                          >
+                            Explore All →
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -975,7 +1021,7 @@ function Navigation({
 
         {/* Right Nav Icons */}
         <div className="flex items-center gap-4 md:gap-5">
-          {/* User Account / Login & Orders trigger (Replaces INR button) */}
+          {/* User Account / Login & Orders trigger */}
           {user ? (
             <button
               onClick={onOpenAccount}
@@ -1056,6 +1102,8 @@ function Navigation({
 
 // 2b. Mobile Navigation Side Drawer
 function MobileMenuDrawer({
+  tenant,
+  products = PRODUCTS,
   isOpen,
   onClose,
   onNavigate,
@@ -1068,6 +1116,8 @@ function MobileMenuDrawer({
   user,
   wishlistCount,
 }: {
+  tenant?: TenantConfig | null
+  products?: Product[]
   isOpen: boolean
   onClose: () => void
   onNavigate: (view: 'home' | 'catalog', category?: string) => void
@@ -1082,6 +1132,9 @@ function MobileMenuDrawer({
 }) {
   if (!isOpen) return null
 
+  const safeProducts = products || PRODUCTS
+  const categories = Array.from(new Set(safeProducts.map((p) => p.category)))
+
   return (
     <div className="fixed inset-0 z-50 overflow-hidden md:hidden">
       <div onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-xs animate-fade-in" />
@@ -1089,7 +1142,7 @@ function MobileMenuDrawer({
         <div className="w-screen max-w-xs bg-white shadow-2xl flex flex-col justify-between animate-slide-down p-6">
           <div>
             <div className="flex items-center justify-between border-b border-black/10 pb-4 mb-6">
-              <img src="/lunar-logo.png" alt="The Lunar Clothing" className="h-8 w-auto object-contain rounded-md" />
+              <BrandLogo tenant={tenant} />
               <button onClick={onClose} className="text-black/60 text-lg cursor-pointer">✕</button>
             </div>
 
@@ -1107,24 +1160,15 @@ function MobileMenuDrawer({
                 <span>ALL COLLECTIONS</span>
                 <span className="text-[10px] bg-black text-white px-2 py-0.5 font-mono">NEW</span>
               </button>
-              <button
-                onClick={() => { onClose(); onNavigate('catalog', 'maxis') }}
-                className="text-left py-2 hover:text-black/60 border-b border-black/5 cursor-pointer"
-              >
-                100% COTTON MAXIS
-              </button>
-              <button
-                onClick={() => { onClose(); onNavigate('catalog', 'dresses') }}
-                className="text-left py-2 hover:text-black/60 border-b border-black/5 cursor-pointer"
-              >
-                MUL CHANDERI DRESSES
-              </button>
-              <button
-                onClick={() => { onClose(); onNavigate('catalog', 'kalamkari') }}
-                className="text-left py-2 hover:text-black/60 border-b border-black/5 cursor-pointer"
-              >
-                KALAMKARI BLOCK PRINT
-              </button>
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => { onClose(); onNavigate('catalog', cat) }}
+                  className="text-left py-2 hover:text-black/60 border-b border-black/5 cursor-pointer"
+                >
+                  {cat.toUpperCase()}
+                </button>
+              ))}
               <button
                 onClick={() => { onClose(); onOpenAbout() }}
                 className="text-left py-2 hover:text-black/60 border-b border-black/5 cursor-pointer text-amber-900"
@@ -1180,19 +1224,21 @@ function MobileMenuDrawer({
 function WishlistDrawer({
   isOpen,
   onClose,
+  products,
   wishlistIds,
   onRemoveWishlist,
   onSelectProduct,
 }: {
   isOpen: boolean
   onClose: () => void
+  products: Product[]
   wishlistIds: number[]
   onRemoveWishlist: (id: number) => void
   onSelectProduct: (id: number) => void
 }) {
   if (!isOpen) return null
 
-  const wishlistedProducts = PRODUCTS.filter((p) => wishlistIds.includes(p.id))
+  const wishlistedProducts = products.filter((p) => wishlistIds.includes(p.id))
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
@@ -1213,7 +1259,7 @@ function WishlistDrawer({
               <div className="h-full flex flex-col items-center justify-center text-center text-black/50 py-16">
                 <span className="text-4xl mb-3">♡</span>
                 <p className="text-lg font-serif text-black mb-1">Your wishlist is empty</p>
-                <p className="text-xs mb-6 max-w-xs">Save your favorite cotton maxis and ethnic dresses here.</p>
+                <p className="text-xs mb-6 max-w-xs">Save your favorite pieces and custom items here.</p>
                 <button
                   onClick={onClose}
                   className="bg-black text-white font-bold text-xs tracking-widest uppercase px-6 py-3 cursor-pointer"
@@ -1269,35 +1315,48 @@ function WishlistDrawer({
 }
 
 // 3. Hero Section
-function HeroSection({ onShopClick }: { onShopClick: () => void }) {
+function HeroSection({
+  tenant,
+  onShopClick,
+}: {
+  tenant?: TenantConfig | null
+  onShopClick: () => void
+}) {
+  const heroImage = tenant?.theme?.heroImage || 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243'
+  const brandTitle = tenant?.brandName || 'THE LUNAR CLOTHING'
+  const headline = tenant?.theme?.heroHeadline || tenant?.tagline || brandTitle
+  const subhead = tenant?.theme?.heroSubhead || 'Handcrafted collections with pure breathable fabrics, master heritage craftsmanship, and functional luxury details.'
+  const ctaText = tenant?.theme?.heroCtaText || 'EXPLORE COLLECTIONS →'
+  const announcementSub = tenant?.theme?.announcementMessages?.[0] || 'HANDCRAFTED ARTISANAL ETHNIC COLLECTION'
+
   return (
     <section className="relative h-[88vh] min-h-[640px] bg-stone-950 flex items-center justify-center overflow-hidden">
       <img
-        src="https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243"
-        alt="The Lunar Clothing Cotton Maxis"
-        className="absolute inset-0 w-full h-full object-cover object-center opacity-70 scale-105"
+        src={heroImage}
+        alt={brandTitle}
+        className="absolute inset-0 w-full h-full object-cover object-center opacity-70 scale-105 transition-all duration-700"
       />
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/20" />
 
       <div className="relative z-10 text-center text-white px-6 max-w-4xl mx-auto">
         <span className="bg-white/20 backdrop-blur-md text-white text-[10px] font-bold tracking-[0.25em] uppercase px-4 py-1.5 mb-6 inline-block border border-white/30">
-          ELEGANT COTTON MAXIS & CHANDERI DRESSES
+          {announcementSub}
         </span>
         <h1
-          className="text-5xl md:text-7xl lg:text-8xl font-normal tracking-tight uppercase leading-[0.95] mb-6 text-white"
+          className="text-4xl md:text-6xl lg:text-7xl font-normal tracking-tight uppercase leading-[0.95] mb-6 text-white"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          THE LUNAR CLOTHING
+          {headline}
         </h1>
-        <p className="text-sm md:text-lg tracking-widest text-white/80 font-light max-w-xl mx-auto mb-10">
-          Handcrafted 100% soft cotton maxis, artisanal Kalamkari prints, and Mul Chanderi dresses with functional side pockets.
+        <p className="text-sm md:text-lg tracking-widest text-white/80 font-light max-w-2xl mx-auto mb-10 leading-relaxed">
+          {subhead}
         </p>
         <div className="flex items-center justify-center gap-6 flex-wrap">
           <button
             onClick={onShopClick}
             className="bg-white text-black font-bold text-xs tracking-[0.2em] uppercase px-9 py-4 hover:bg-black hover:text-white border border-white transition-all duration-300 shadow-2xl active:scale-95 cursor-pointer"
           >
-            EXPLORE COLLECTIONS →
+            {ctaText}
           </button>
         </div>
       </div>
@@ -1306,20 +1365,21 @@ function HeroSection({ onShopClick }: { onShopClick: () => void }) {
 }
 
 // 4. Trust Banner - Moving Ticker
-function TrustBar() {
+function TrustBar({ tenant }: { tenant?: TenantConfig | null }) {
+  const brandShort = tenant?.brandName?.split(' ')?.[0] || 'LUNAR'
   const items = [
     { icon: '🌐', text: 'FREE SHIPPING IN INDIA > ₹999' },
-    { icon: '❇️', text: '100% SOFT BREATHABLE COTTON' },
-    { icon: '🛡️', text: 'FUNCTIONAL POCKETS ATTACHED' },
-    { icon: '❇️', text: '15,000+ HAPPY CUSTOMERS' },
-    { icon: '💧', text: 'ARTISANAL KALAMKARI & HANDLOOM' },
-    { icon: '⚡', text: '100% QUALITY GUARANTEED' },
+    { icon: '❇️', text: '100% AUTHENTIC ARTISANAL CRAFT' },
+    { icon: '🛡️', text: 'QUALITY CERTIFIED & TESTED' },
+    { icon: '❇️', text: `10,000+ HAPPY ${brandShort.toUpperCase()} CLIENTS` },
+    { icon: '💧', text: 'HANDLOOM & HERITAGE WEAVES' },
+    { icon: '⚡', text: '100% SATISFACTION GUARANTEE' },
     { icon: '🌐', text: 'FREE SHIPPING IN INDIA > ₹999' },
-    { icon: '❇️', text: '100% SOFT BREATHABLE COTTON' },
-    { icon: '🛡️', text: 'FUNCTIONAL POCKETS ATTACHED' },
-    { icon: '❇️', text: '15,000+ HAPPY CUSTOMERS' },
-    { icon: '💧', text: 'ARTISANAL KALAMKARI & HANDLOOM' },
-    { icon: '⚡', text: '100% QUALITY GUARANTEED' },
+    { icon: '❇️', text: '100% AUTHENTIC ARTISANAL CRAFT' },
+    { icon: '🛡️', text: 'QUALITY CERTIFIED & TESTED' },
+    { icon: '❇️', text: `10,000+ HAPPY ${brandShort.toUpperCase()} CLIENTS` },
+    { icon: '💧', text: 'HANDLOOM & HERITAGE WEAVES' },
+    { icon: '⚡', text: '100% SATISFACTION GUARANTEE' },
   ]
 
   return (
@@ -1419,7 +1479,7 @@ function ProductCard({
           </div>
         </div>
 
-        <h3 className="text-sm font-semibold tracking-wide text-black group-hover:underline underline-offset-4 mb-1">
+        <h3 className="text-sm font-semibold tracking-wide text-black group-hover:underline underline-offset-4 mb-1 truncate">
           {product.name}
         </h3>
 
@@ -1443,33 +1503,38 @@ function ProductCard({
 
 // 6. Bestsellers Section
 function BestsellersSection({
+  tenant,
+  products,
   wishlist,
   onToggleWishlist,
   onSelectProduct,
 }: {
+  tenant?: TenantConfig | null
+  products: Product[]
   wishlist: number[]
   onToggleWishlist: (id: number) => void
   onSelectProduct: (id: number) => void
 }) {
+  const brandName = tenant?.brandName || 'The Lunar Clothing'
   return (
     <section className="py-20 bg-white/70 backdrop-blur-xs relative z-10">
       <div className="max-w-screen-2xl mx-auto px-6 mb-8 flex items-end justify-between">
         <div>
-          <p className="text-xs font-bold tracking-[0.25em] uppercase text-black/40 mb-2">HANDCRAFTED ETHNIC COLLECTION</p>
+          <p className="text-xs font-bold tracking-[0.25em] uppercase text-black/40 mb-2">HANDCRAFTED ARTISANAL COLLECTION</p>
           <h2 className="text-4xl md:text-5xl font-normal text-black" style={{ fontFamily: 'var(--font-display)' }}>
-            Lunar Bestsellers
+            {tenant?.brandName ? `${tenant.brandName.split(' ')[0]} Bestsellers` : 'Signature Bestsellers'}
           </h2>
         </div>
         <button
-          onClick={() => onSelectProduct(1)}
+          onClick={() => onSelectProduct(products[0]?.id || 1)}
           className="text-xs font-bold tracking-widest uppercase text-black hover:text-black/60 border-b border-black pb-0.5 cursor-pointer"
         >
-          VIEW ALL MAXIS →
+          VIEW ALL PRODUCTS →
         </button>
       </div>
 
       <div className="pl-6 md:pl-[max(24px,calc((100vw-1536px)/2+24px))] flex gap-6 overflow-x-auto scroll-hide pb-6">
-        {PRODUCTS.map((product) => (
+        {products.map((product) => (
           <ProductCard
             key={product.id}
             product={product}
@@ -1485,8 +1550,10 @@ function BestsellersSection({
 
 // 8. Shop By Category Dark Carousel Section
 function ShopByCategorySection({
+  products,
   onSelectCategory,
 }: {
+  products: Product[]
   onSelectCategory: (cat: string) => void
 }) {
   const scrollLeft = () => {
@@ -1499,28 +1566,25 @@ function ShopByCategorySection({
     if (el) el.scrollBy({ left: 520, behavior: 'smooth' })
   }
 
-  const categories = [
-    {
-      name: 'COTTON MAXIS →',
-      category: 'maxis',
-      img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
-    },
-    {
-      name: 'CHANDERI DRESSES →',
-      category: 'dresses',
-      img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5234.jpg?v=1778607246',
-    },
-    {
-      name: 'KALAMKARI SERIES →',
-      category: 'kalamkari',
-      img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5223_1.jpg?v=1778607242',
-    },
-    {
-      name: 'HANDLOOM COTTON →',
-      category: 'handloom',
-      img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2175.jpg?v=1766941862',
-    },
-  ]
+  const categories = useMemo(() => {
+    const map = new Map<string, { name: string; category: string; img: string }>()
+    products.forEach((p) => {
+      if (!map.has(p.category)) {
+        const displayName = p.category === 'maxis' ? 'KURTAS & MAXIS →'
+          : p.category === 'dresses' ? 'SAREES & DRESSES →'
+          : p.category === 'kalamkari' ? 'PRINTS & STOLES →'
+          : p.category === 'handloom' ? 'HANDLOOM WEAVES →'
+          : `${p.category.toUpperCase()} →`
+
+        map.set(p.category, {
+          name: displayName,
+          category: p.category,
+          img: p.imgMain,
+        })
+      }
+    })
+    return Array.from(map.values())
+  }, [products])
 
   return (
     <section className="py-24 md:py-32 bg-[#141414] text-white border-t border-white/10 select-none">
@@ -1579,44 +1643,30 @@ function ShopByCategorySection({
 }
 
 // 9. Fabric Matrix
-function LeggingsFabricMatrix({ onSelectProduct }: { onSelectProduct: (id: number) => void }) {
-  const fabrics = [
-    {
-      num: '01',
-      title: '100% SOFT COTTON©',
-      sculpt: 'NATURAL WEAVE',
-      desc: 'Pure breathable cotton yarn with attached side waist tie-up ropes and deep functional utility pockets.',
-      img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
-    },
-    {
-      num: '02',
-      title: 'MUL CHANDERI SILK©',
-      sculpt: 'FESTIVE WEAVE',
-      desc: 'Weightless Mul Chanderi silk fabric lined with pure cotton for festive occasions and celebrations.',
-      img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5234.jpg?v=1778607246',
-    },
-    {
-      num: '03',
-      title: 'ARTISANAL KALAMKARI©',
-      sculpt: 'BLOCK PRINT',
-      desc: 'Heritage Indian handblock Kalamkari motifs printed ethically with natural dyes on soft cotton.',
-      img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5223_1.jpg?v=1778607242',
-    },
-    {
-      num: '04',
-      title: 'HANDLOOM WEAVE©',
-      sculpt: 'ETHNIC CRAFT',
-      desc: 'Woven on traditional Indian handlooms with delicate motifs and pre-washed cloud soft texture.',
-      img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2175.jpg?v=1766941862',
-    },
-  ]
+function LeggingsFabricMatrix({
+  products,
+  onSelectProduct,
+}: {
+  products: Product[]
+  onSelectProduct: (id: number) => void
+}) {
+  const fabrics = useMemo(() => {
+    return products.slice(0, 4).map((p, idx) => ({
+      num: `0${idx + 1}`,
+      title: `${p.fabricTech.toUpperCase()}©`,
+      sculpt: p.sculptLevel,
+      desc: p.fabricDesc,
+      img: p.imgMain,
+      id: p.id,
+    }))
+  }, [products])
 
   return (
     <section className="py-20 bg-[#F5F4F1]/75 backdrop-blur-xs relative z-10">
       <div className="max-w-screen-2xl mx-auto px-6 mb-12">
         <p className="text-xs font-bold tracking-[0.25em] uppercase text-black/40 mb-2">CRAFT & FABRIC MATRIX</p>
         <h2 className="text-4xl md:text-5xl font-normal text-black" style={{ fontFamily: 'var(--font-display)' }}>
-          4 Signature Weaves
+          Signature Fabric Weaves
         </h2>
       </div>
 
@@ -1624,7 +1674,7 @@ function LeggingsFabricMatrix({ onSelectProduct }: { onSelectProduct: (id: numbe
         {fabrics.map((f) => (
           <div
             key={f.num}
-            onClick={() => onSelectProduct(1)}
+            onClick={() => onSelectProduct(f.id)}
             className="group cursor-pointer relative bg-stone-900 overflow-hidden aspect-[3/4] shadow-lg"
           >
             <img
@@ -1656,19 +1706,27 @@ function LeggingsFabricMatrix({ onSelectProduct }: { onSelectProduct: (id: numbe
 }
 
 // 10. Triptych Category Banner
-function ActivityTriptych({ onSelectProduct }: { onSelectProduct: (id: number) => void }) {
-  const activities = [
-    { title: 'COTTON MAXIS', img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243' },
-    { title: 'CHANDERI DRESSES', img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5234.jpg?v=1778607246' },
-    { title: 'KALAMKARI PRINTS', img: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5223_1.jpg?v=1778607242' },
-  ]
+function ActivityTriptych({
+  products,
+  onSelectProduct,
+}: {
+  products: Product[]
+  onSelectProduct: (id: number) => void
+}) {
+  const activities = useMemo(() => {
+    return products.slice(0, 3).map((p) => ({
+      title: p.name.toUpperCase(),
+      img: p.imgMain,
+      id: p.id,
+    }))
+  }, [products])
 
   return (
     <section className="grid grid-cols-1 md:grid-cols-3 h-[65vh] min-h-[480px]">
       {activities.map((a) => (
         <div
-          key={a.title}
-          onClick={() => onSelectProduct(1)}
+          key={a.id}
+          onClick={() => onSelectProduct(a.id)}
           className="relative overflow-hidden group cursor-pointer bg-stone-900"
         >
           <img
@@ -1677,9 +1735,9 @@ function ActivityTriptych({ onSelectProduct }: { onSelectProduct: (id: number) =
             className="w-full h-full object-cover opacity-80 group-hover:scale-105 transition-transform duration-700"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-          <div className="absolute bottom-8 left-8 text-white">
+          <div className="absolute bottom-8 left-8 text-white max-w-xs">
             <p className="text-xs tracking-[0.2em] font-semibold uppercase text-white/60 mb-2">← EXPLORE RANGE</p>
-            <h3 className="text-4xl md:text-5xl font-serif uppercase tracking-tight">{a.title}</h3>
+            <h3 className="text-3xl md:text-4xl font-serif uppercase tracking-tight line-clamp-2">{a.title}</h3>
           </div>
         </div>
       ))}
@@ -1688,19 +1746,29 @@ function ActivityTriptych({ onSelectProduct }: { onSelectProduct: (id: number) =
 }
 
 // 11. Mission Block
-function MissionBlock({ onShopClick }: { onShopClick: () => void }) {
+function MissionBlock({
+  tenant,
+  onShopClick,
+}: {
+  tenant?: TenantConfig | null
+  onShopClick: () => void
+}) {
+  const brandName = tenant?.brandName || 'The Lunar Clothing'
+  const owner = tenant?.ownerName || 'Our Artisans'
+  const bgImg = tenant?.theme?.heroImage || 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2171_1.jpg?v=1766941862'
+
   return (
     <section className="relative py-36 md:py-48 bg-stone-950 text-center text-white overflow-hidden select-none border-t border-white/10">
       <img
-        src="https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2171_1.jpg?v=1766941862"
-        alt="The Lunar Clothing Philosophy"
+        src={bgImg}
+        alt={`${brandName} Philosophy`}
         className="absolute inset-0 w-full h-full object-cover opacity-25 object-center"
       />
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/30" />
 
       <div className="relative z-10 max-w-3xl mx-auto px-6">
         <p className="text-[11px] font-bold tracking-[0.3em] uppercase text-white/70 mb-4 font-mono">
-          THE LUNAR PHILOSOPHY
+          THE {brandName.toUpperCase()} PHILOSOPHY
         </p>
 
         <h2
@@ -1711,7 +1779,7 @@ function MissionBlock({ onShopClick }: { onShopClick: () => void }) {
         </h2>
 
         <p className="text-xs sm:text-sm md:text-base font-light text-white/80 max-w-xl mx-auto mb-10 leading-relaxed font-sans">
-          The Lunar Clothing was born from a genuine desire for less but better. Premium soft cotton maxis with functional side pockets, handmade Kalamkari details, and quality that lasts.
+          {brandName} was created by {owner} with a genuine desire for less but better. Pure artisanal fabrics, conscious craftsmanship, and timeless quality created to last.
         </p>
 
         <div className="flex items-center justify-center">
@@ -1915,6 +1983,8 @@ function ProductDetailPage({
   product,
   wishlist,
   reviews,
+  products = PRODUCTS,
+  tenant,
   onToggleWishlist,
   onAddToCart,
   onBack,
@@ -1924,6 +1994,8 @@ function ProductDetailPage({
   product: Product
   wishlist: number[]
   reviews: Review[]
+  products?: Product[]
+  tenant?: TenantConfig
   onToggleWishlist: (id: number) => void
   onAddToCart: (
     product: Product,
@@ -2339,7 +2411,7 @@ function ProductDetailPage({
         <div className="border-t border-black/10 pt-16 mb-16">
           <h2 className="text-3xl font-normal font-serif text-black mb-8">Complete The Look</h2>
           <div className="flex gap-6 overflow-x-auto scroll-hide pb-4">
-            {PRODUCTS.filter((p) => p.id !== product.id).map((p) => (
+            {products.filter((p) => p.id !== product.id).map((p) => (
               <ProductCard
                 key={p.id}
                 product={p}
@@ -2362,7 +2434,7 @@ function ProductDetailPage({
             >
               ✕
             </button>
-            <h3 className="text-2xl font-serif text-black mb-2">The Lunar Clothing Size & Fit Guide</h3>
+            <h3 className="text-2xl font-serif text-black mb-2">{tenant?.name || 'The Lunar Clothing'} Size & Fit Guide</h3>
             <p className="text-xs text-black/60 mb-6">Measurements in inches. All cotton maxis feature attached side waist tie-up ropes for an adjustable flared fit.</p>
 
             <table className="w-full text-xs text-left border-collapse mb-6">
@@ -3767,21 +3839,29 @@ function AboutModal({
   isOpen,
   onClose,
   onShopClick,
+  tenant,
 }: {
   isOpen: boolean
   onClose: () => void
   onShopClick: () => void
+  tenant?: TenantConfig
 }) {
   if (!isOpen) return null
+
+  const brandName = tenant?.name || 'THE LUNAR CLOTHING'
+  const brandTagline = tenant?.tagline || 'Thoughtfully Handcrafted For Weightless Everyday Living.'
+  const aboutBio = tenant?.aboutStory || `${brandName} was born out of a desire for effortless silhouettes and bespoke artisanal craft. Each piece is crafted with utmost care, celebrating authentic Indian textile traditions, premium fabrics, and heirloom silhouettes that elevate everyday occasions and festive celebrations.`
+  const currencySymbol = tenant?.currencySymbol || '₹'
+  const freeThreshold = tenant?.contact?.shippingThresholdFormatted || `${currencySymbol}999`
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white max-w-2xl w-full border border-black/10 shadow-2xl rounded-sm overflow-hidden animate-slide-down my-8">
         <div className="bg-black text-white p-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/lunar-logo.png" alt="Lunar" className="h-8 w-auto object-contain rounded-md" />
+            <BrandLogo tenant={tenant} className="h-9 w-auto" />
             <div>
-              <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">THE LUNAR CLOTHING</p>
+              <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">{brandName}</p>
               <h2 className="text-lg font-serif">About Our Studio & Craft</h2>
             </div>
           </div>
@@ -3796,43 +3876,43 @@ function AboutModal({
               HERITAGE & COMFORT
             </span>
             <h3 className="text-2xl font-serif text-black mt-2 mb-3">
-              Thoughtfully Handcrafted For Weightless Everyday Living.
+              {brandTagline}
             </h3>
             <p className="text-sm font-light text-black/70 leading-relaxed">
-              The Lunar Clothing was born out of a desire for effortless silhouettes made from 100% pure breathable cotton. Each piece is crafted in India, celebrating heritage block print traditions like Kalamkari, luxurious Mul Chanderi silks, and soft woven textures that elevate everyday lounging and celebratory gatherings.
+              {aboutBio}
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
             <div className="border border-black/10 p-4 bg-stone-50">
               <div className="text-xl mb-1">🌿</div>
-              <h4 className="font-bold text-black uppercase tracking-wider mb-1">100% Pure Cotton</h4>
+              <h4 className="font-bold text-black uppercase tracking-wider mb-1">Pure Artisanal Fabrics</h4>
               <p className="text-[11px] text-black/60 leading-normal">
-                Airy, skin-friendly fabrics pre-shrunk for zero post-wash surprises.
+                Airy, skin-friendly handloom & organic weaves pre-treated for pure comfort.
               </p>
             </div>
 
             <div className="border border-black/10 p-4 bg-stone-50">
               <div className="text-xl mb-1">👗</div>
-              <h4 className="font-bold text-black uppercase tracking-wider mb-1">Functional Pockets</h4>
+              <h4 className="font-bold text-black uppercase tracking-wider mb-1">Tailored Silhouettes</h4>
               <p className="text-[11px] text-black/60 leading-normal">
-                Deep utility side pockets on all maxis with custom maternity feeding zips available.
+                Bespoke sizing, custom lengths, and functional utility side pockets.
               </p>
             </div>
 
             <div className="border border-black/10 p-4 bg-stone-50">
               <div className="text-xl mb-1">🎨</div>
-              <h4 className="font-bold text-black uppercase tracking-wider mb-1">Artisanal Craft</h4>
+              <h4 className="font-bold text-black uppercase tracking-wider mb-1">Ethical Heritage</h4>
               <p className="text-[11px] text-black/60 leading-normal">
-                Ethically hand-printed Kalamkari & festive Mul Chanderi supporting Indian artisans.
+                Direct weaver partnerships sustaining generational Indian artisan clusters.
               </p>
             </div>
           </div>
 
           <div className="bg-stone-900 text-white p-5 rounded-xs flex flex-col sm:flex-row items-center justify-between gap-4">
             <div>
-              <p className="font-bold uppercase tracking-wider text-sm">Experience The Lunar Flavour</p>
-              <p className="text-white/60 text-[11px]">Free shipping across India on orders over ₹999.</p>
+              <p className="font-bold uppercase tracking-wider text-sm">Experience {brandName}</p>
+              <p className="text-white/60 text-[11px]">Free shipping across India on orders over {freeThreshold}.</p>
             </div>
             <button
               onClick={() => {
@@ -3855,10 +3935,12 @@ function ContactModal({
   isOpen,
   onClose,
   onSuccessMessage,
+  tenant,
 }: {
   isOpen: boolean
   onClose: () => void
   onSuccessMessage: (msg: string) => void
+  tenant?: TenantConfig
 }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -3869,10 +3951,17 @@ function ContactModal({
 
   if (!isOpen) return null
 
+  const brandName = tenant?.name || 'The Lunar Clothing'
+  const contactPhone = tenant?.contact?.phone || '+91 98765 43210'
+  const contactEmail = tenant?.contact?.email || 'care@thelunarclothing.com'
+  const contactAddress = tenant?.contact?.address || 'Studio: Jubilee Hills, Hyderabad & Jaipur'
+  const workingHours = tenant?.contact?.workingHours || 'Mon–Sat: 10AM – 7PM IST'
+  const cleanPhone = contactPhone.replace(/[^0-9]/g, '')
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitted(true)
-    onSuccessMessage('Thank you! Your message has been sent to Lunar Customer Care.')
+    onSuccessMessage(`Thank you! Your message has been sent to ${brandName} Customer Care.`)
     setTimeout(() => {
       setSubmitted(false)
       onClose()
@@ -3884,9 +3973,9 @@ function ContactModal({
       <div className="bg-white max-w-xl w-full border border-black/10 shadow-2xl rounded-sm overflow-hidden animate-slide-down my-8">
         <div className="bg-black text-white p-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/lunar-logo.png" alt="Lunar" className="h-8 w-auto object-contain rounded-md" />
+            <BrandLogo tenant={tenant} className="h-9 w-auto" />
             <div>
-              <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">THE LUNAR CLOTHING</p>
+              <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">{brandName}</p>
               <h2 className="text-lg font-serif">Contact Customer Care</h2>
             </div>
           </div>
@@ -3899,7 +3988,7 @@ function ContactModal({
           {/* Direct channels */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <a
-              href="https://wa.me/919876543210?text=Hello%20The%20Lunar%20Clothing,%20I%20have%20an%20inquiry%20regarding%20my%20order."
+              href={`https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Hello ${brandName}, I have an inquiry regarding my order.`)}`}
               target="_blank"
               rel="noreferrer"
               className="border border-emerald-300 bg-emerald-50/70 p-3.5 flex items-center gap-3 hover:bg-emerald-100 transition-colors cursor-pointer group"
@@ -3907,7 +3996,7 @@ function ContactModal({
               <span className="text-2xl">💬</span>
               <div>
                 <p className="font-bold text-emerald-950 uppercase tracking-wider text-[11px]">Instant WhatsApp</p>
-                <p className="text-emerald-800 text-[11px] font-mono font-semibold">+91 98765 43210</p>
+                <p className="text-emerald-800 text-[11px] font-mono font-semibold">{contactPhone}</p>
               </div>
             </a>
 
@@ -3915,14 +4004,14 @@ function ContactModal({
               <span className="text-2xl">✉</span>
               <div>
                 <p className="font-bold text-black uppercase tracking-wider text-[11px]">Email Support</p>
-                <p className="text-black/70 text-[11px] font-mono">care@thelunarclothing.com</p>
+                <p className="text-black/70 text-[11px] font-mono">{contactEmail}</p>
               </div>
             </div>
           </div>
 
           <div className="bg-stone-50 border border-black/10 p-3 text-[11px] text-black/70 flex justify-between items-center">
-            <span>📍 Studio: Jubilee Hills, Hyderabad & Jaipur</span>
-            <span className="font-semibold text-black">Mon–Sat: 10AM – 7PM IST</span>
+            <span>📍 {contactAddress}</span>
+            <span className="font-semibold text-black">{workingHours}</span>
           </div>
 
           {/* Form */}
@@ -3930,7 +4019,7 @@ function ContactModal({
             <div className="text-center py-8 bg-emerald-50 border border-emerald-200 p-6">
               <span className="text-3xl">✓</span>
               <h4 className="text-base font-bold text-emerald-950 mt-2">Message Sent Successfully!</h4>
-              <p className="text-emerald-800 text-[11px] mt-1">Our support executive will get back to you shortly.</p>
+              <p className="text-emerald-800 text-[11px] mt-1">Our support executive at {brandName} will get back to you shortly.</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-3.5">
@@ -3956,7 +4045,7 @@ function ContactModal({
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+91 98765 43210"
+                    placeholder={contactPhone}
                     className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
                   />
                 </div>
@@ -3982,7 +4071,7 @@ function ContactModal({
                   className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs bg-white cursor-pointer"
                 >
                   <option value="Order Tracking Inquiry">Order Tracking & Courier Delivery</option>
-                  <option value="Custom Tailoring / Sizing">Custom Length, Feeding Zips, or Lining</option>
+                  <option value="Custom Tailoring / Sizing">Custom Length, Sizing or Fabric Details</option>
                   <option value="Exchange or Return">Exchange & Returns Support</option>
                   <option value="Wholesale or Collaboration">Artisan Collaboration / Bulk Orders</option>
                   <option value="General Inquiry">General Inquiry</option>
@@ -4020,22 +4109,28 @@ function SearchOverlay({
   isOpen,
   onClose,
   onSelectProduct,
+  products = PRODUCTS,
+  tenant,
 }: {
   isOpen: boolean
   onClose: () => void
   onSelectProduct: (id: number) => void
+  products?: Product[]
+  tenant?: TenantConfig
 }) {
   const [query, setQuery] = useState('')
 
   if (!isOpen) return null
 
-  const results = PRODUCTS.filter(
+  const results = products.filter(
     (p) =>
       p.name.toLowerCase().includes(query.toLowerCase()) ||
       p.category.toLowerCase().includes(query.toLowerCase()) ||
       p.fabricTech.toLowerCase().includes(query.toLowerCase()) ||
       p.sculptLevel.toLowerCase().includes(query.toLowerCase())
   )
+
+  const brandName = tenant?.name || 'Our'
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm animate-fade-in flex flex-col items-center pt-20 px-6">
@@ -4045,7 +4140,7 @@ function SearchOverlay({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search Cotton Maxis, Kalamkari, Chanderi Dresses..."
+            placeholder={`Search ${brandName} products, fabrics, collections...`}
             className="w-full text-lg font-serif text-black outline-none bg-transparent placeholder-black/30"
             autoFocus
           />
@@ -4057,7 +4152,7 @@ function SearchOverlay({
         <div className="max-h-96 overflow-y-auto space-y-4">
           {query.trim() === '' ? (
             <p className="text-xs text-black/40 uppercase tracking-widest text-center py-6">
-              Type to search cotton maxis, kalamkari, or chanderi dresses...
+              Type to search products, fabrics, or categories in {brandName}...
             </p>
           ) : results.length === 0 ? (
             <p className="text-xs text-black/50 text-center py-6">No products found matching "{query}"</p>
@@ -4089,11 +4184,15 @@ function SearchOverlay({
 function CatalogPage({
   categoryFilter,
   wishlist,
+  products = PRODUCTS,
+  tenant,
   onToggleWishlist,
   onSelectProduct,
 }: {
   categoryFilter: string
   wishlist: number[]
+  products?: Product[]
+  tenant?: TenantConfig
   onToggleWishlist: (id: number) => void
   onSelectProduct: (id: number) => void
 }) {
@@ -4105,7 +4204,7 @@ function CatalogPage({
   }, [categoryFilter])
 
   const filteredProducts = useMemo(() => {
-    let list = activeFilter === 'all' ? [...PRODUCTS] : PRODUCTS.filter((p) => p.category === activeFilter)
+    let list = activeFilter === 'all' ? [...products] : products.filter((p) => p.category === activeFilter)
 
     if (sortBy === 'price-low') {
       list.sort((a, b) => a.price - b.price)
@@ -4116,40 +4215,44 @@ function CatalogPage({
     }
 
     return list
-  }, [activeFilter, sortBy])
+  }, [activeFilter, sortBy, products])
 
-  const categoryLabels: Record<string, string> = {
-    all: 'ALL PRODUCTS',
-    maxis: 'COTTON MAXIS',
-    dresses: 'CHANDERI DRESSES',
-    kalamkari: 'KALAMKARI',
-    handloom: 'HANDLOOM',
-  }
+  // Derive unique categories dynamically
+  const categories = useMemo(() => {
+    const rawCategories = Array.from(new Set(products.map((p) => p.category)))
+    return ['all', ...rawCategories]
+  }, [products])
+
+  const brandName = tenant?.name || 'THE LUNAR CLOTHING'
+  const brandTagline = tenant?.tagline || 'Handcrafted Cotton Maxis & Ethnic Dresses'
 
   return (
     <div className="py-12 bg-white min-h-screen">
       <div className="max-w-screen-2xl mx-auto px-6">
         <div className="mb-10 text-center max-w-2xl mx-auto">
-          <p className="text-xs font-bold tracking-[0.3em] uppercase text-black/40 mb-2">THE LUNAR CLOTHING COLLECTION</p>
-          <h1 className="text-4xl md:text-5xl font-serif text-black mb-4">Handcrafted Cotton Maxis & Ethnic Dresses</h1>
+          <p className="text-xs font-bold tracking-[0.3em] uppercase text-black/40 mb-2">{brandName} COLLECTION</p>
+          <h1 className="text-4xl md:text-5xl font-serif text-black mb-4">{brandTagline}</h1>
           <p className="text-sm text-black/60 leading-relaxed">
-            100% pure breathable cotton maxis, artisanal Kalamkari prints, and Mul Chanderi dresses with functional side pockets.
+            {tenant?.aboutStory || 'Discover handcrafted silhouettes, breathable pure fabrics, and timeless artisanal craft.'}
           </p>
         </div>
 
         {/* Filter Tabs */}
         <div className="flex items-center justify-center gap-3 mb-8 flex-wrap text-xs font-bold tracking-widest uppercase">
-          {['all', 'maxis', 'dresses', 'kalamkari', 'handloom'].map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setActiveFilter(cat)}
-              className={`px-5 py-2.5 border transition-all cursor-pointer ${
-                activeFilter === cat ? 'bg-black text-white border-black shadow-md' : 'bg-white text-black border-black/20 hover:border-black'
-              }`}
-            >
-              {categoryLabels[cat] || cat.toUpperCase()}
-            </button>
-          ))}
+          {categories.map((cat) => {
+            const label = cat === 'all' ? 'ALL PRODUCTS' : cat.toUpperCase()
+            return (
+              <button
+                key={cat}
+                onClick={() => setActiveFilter(cat)}
+                className={`px-5 py-2.5 border transition-all cursor-pointer ${
+                  activeFilter === cat ? 'bg-black text-white border-black shadow-md' : 'bg-white text-black border-black/20 hover:border-black'
+                }`}
+              >
+                {label}
+              </button>
+            )
+          })}
         </div>
 
         {/* Sorting & Filter Header Bar */}
@@ -4191,23 +4294,27 @@ function CatalogPage({
 }
 
 // 18. FOOTER COMPONENT
-function Footer() {
+function Footer({ tenant }: { tenant?: TenantConfig }) {
+  const brandName = tenant?.name || 'THE LUNAR CLOTHING'
+  const brandTagline = tenant?.tagline || 'Handcrafted 100% soft cotton maxis, artisanal block prints, and festive dresses with functional side pockets.'
+  const shippingText = tenant?.contact?.shippingThresholdFormatted ? `Free Shipping over ${tenant.contact.shippingThresholdFormatted}` : 'Free Shipping over ₹999'
+
   return (
     <footer className="bg-black text-white pt-20 pb-12 border-t border-white/10 select-none">
       <div className="max-w-screen-2xl mx-auto px-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16">
           <div className="md:col-span-2">
             <div className="flex items-center gap-3.5 mb-4">
-              <img src="/lunar-logo.png" alt="Lunar" className="h-9 w-auto object-contain rounded-md" />
-              <h3 className="text-2xl md:text-3xl font-bold tracking-[0.2em] font-sans uppercase">THE LUNAR CLOTHING</h3>
+              <BrandLogo tenant={tenant} className="h-9 w-auto" />
+              <h3 className="text-2xl md:text-3xl font-bold tracking-[0.2em] font-sans uppercase">{brandName}</h3>
             </div>
             <p className="text-white/60 text-sm max-w-sm mb-6 leading-relaxed">
-              Handcrafted 100% soft cotton maxis, artisanal Kalamkari block prints, and Mul Chanderi dresses with functional side pockets.
+              {brandTagline}
             </p>
             <form onSubmit={(e) => e.preventDefault()} className="flex max-w-md border-b border-white/30 pb-2">
               <input
                 type="email"
-                placeholder="ENTER YOUR EMAIL FOR 15% OFF (CODE: LUNAR15)"
+                placeholder="ENTER YOUR EMAIL FOR 15% OFF"
                 className="bg-transparent text-xs text-white placeholder-white/40 flex-1 outline-none uppercase tracking-widest"
               />
               <button type="submit" className="text-xs font-bold uppercase tracking-widest text-white/80 hover:text-white cursor-pointer">
@@ -4219,7 +4326,7 @@ function Footer() {
           <div>
             <h4 className="text-xs font-bold tracking-widest uppercase text-white/40 mb-4">CUSTOMER CARE</h4>
             <ul className="space-y-2.5 text-xs text-white/70">
-              <li><a href="#" className="hover:text-white">Free Shipping over ₹999</a></li>
+              <li><a href="#" className="hover:text-white">{shippingText}</a></li>
               <li><a href="#" className="hover:text-white">Shipping & Delivery in India</a></li>
               <li><a href="#" className="hover:text-white">Fabric Care & Washing Guide</a></li>
               <li><a href="#" className="hover:text-white">Size Guide & Custom Lengths</a></li>
@@ -4230,20 +4337,52 @@ function Footer() {
           <div>
             <h4 className="text-xs font-bold tracking-widest uppercase text-white/40 mb-4">COLLECTIONS</h4>
             <ul className="space-y-2.5 text-xs text-white/70">
-              <li><a href="#" className="hover:text-white">100% Soft Cotton Maxis</a></li>
-              <li><a href="#" className="hover:text-white">Mul Chanderi Silk Dresses</a></li>
-              <li><a href="#" className="hover:text-white">Kalamkari Handblock Print</a></li>
-              <li><a href="#" className="hover:text-white">Handloom Cotton Series</a></li>
+              {tenant?.categories?.map((cat) => (
+                <li key={cat.id}><a href="#" className="hover:text-white">{cat.name}</a></li>
+              )) || (
+                <>
+                  <li><a href="#" className="hover:text-white">100% Soft Cotton Maxis</a></li>
+                  <li><a href="#" className="hover:text-white">Mul Chanderi Silk Dresses</a></li>
+                  <li><a href="#" className="hover:text-white">Kalamkari Handblock Print</a></li>
+                  <li><a href="#" className="hover:text-white">Handloom Cotton Series</a></li>
+                </>
+              )}
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="text-xs font-bold tracking-widest uppercase text-white/40 mb-4">PARTNER & PORTAL</h4>
+            <ul className="space-y-2.5 text-xs text-white/70">
+              <li>
+                <a
+                  href={`/?panel=dashboard&tenant=${tenant?.slug || 'lunar'}`}
+                  className="hover:text-white flex items-center gap-1.5 text-amber-300 font-semibold"
+                >
+                  <span>🔐</span>
+                  <span>Seller Portal Login</span>
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/?panel=admin"
+                  className="hover:text-white flex items-center gap-1.5 text-violet-300 font-semibold"
+                >
+                  <span>🛡️</span>
+                  <span>Orvexa Tech Admin Hub</span>
+                </a>
+              </li>
+              <li><a href="#" className="hover:text-white">Merchant Application</a></li>
+              <li><a href="#" className="hover:text-white">Brand Partnerships</a></li>
             </ul>
           </div>
         </div>
 
         <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-white/40">
-          <p>© {new Date().getFullYear()} THE LUNAR CLOTHING. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} {brandName}. All rights reserved.</p>
           <div className="flex gap-6">
             <span>PRIVACY POLICY</span>
             <span>TERMS OF SERVICE</span>
-            <span>INDIA (₹ INR)</span>
+            <span>INDIA ({tenant?.currencySymbol || '₹'} {tenant?.currency || 'INR'})</span>
           </div>
         </div>
       </div>
@@ -4253,6 +4392,23 @@ function Footer() {
 
 // --- MAIN APP COMPONENT ---
 export default function App() {
+  const layer = useApplicationLayer()
+  const { tenant } = useTenant()
+
+  if (layer === 'admin') {
+    return <AdminApp />
+  }
+
+  if (layer === 'dashboard') {
+    return <DashboardApp />
+  }
+
+  // Active Tenant Resolution
+  const activeTenant: TenantConfig = tenant || mockStore.getTenantBySlug('lunar') || MOCK_TENANTS[0]
+  const tenantProducts = useMemo(() => mockStore.getProducts(activeTenant.id), [activeTenant.id])
+  const tenantReviews = useMemo(() => mockStore.getReviews(activeTenant.id), [activeTenant.id])
+  const tenantOrders = useMemo(() => mockStore.getOrders(activeTenant.id), [activeTenant.id])
+
   const [showAnnouncement, setShowAnnouncement] = useState(true)
   const [view, setView] = useState<'home' | 'catalog' | 'pdp'>('home')
   const [categoryFilter, setCategoryFilter] = useState('all')
@@ -4260,7 +4416,7 @@ export default function App() {
   
   // User Authentication & Order Tracking State
   const [user, setUser] = useState<UserAccount | null>(null)
-  const [orders, setOrders] = useState<TrackedOrder[]>(INITIAL_ORDERS)
+  const [orders, setOrders] = useState<TrackedOrder[]>(tenantOrders)
   const [isAuthOpen, setIsAuthOpen] = useState(false)
   const [isAccountOpen, setIsAccountOpen] = useState(false)
   const [isAboutOpen, setIsAboutOpen] = useState(false)
@@ -4273,12 +4429,12 @@ export default function App() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
 
-  const [wishlist, setWishlist] = useState<number[]>([1, 3])
-  const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS)
+  const [wishlist, setWishlist] = useState<number[]>([tenantProducts[0]?.id || 1, tenantProducts[1]?.id || 2])
+  const [reviews, setReviews] = useState<Review[]>(tenantReviews)
   const [cart, setCart] = useState<CartItem[]>([
     {
-      product: PRODUCTS[0],
-      selectedColor: PRODUCTS[0].colors[0],
+      product: tenantProducts[0] || PRODUCTS[0],
+      selectedColor: (tenantProducts[0] || PRODUCTS[0]).colors[0],
       selectedSize: 'M',
       selectedLining: 'No Lining',
       selectedZip: 'None',
@@ -4286,6 +4442,26 @@ export default function App() {
       quantity: 1,
     },
   ])
+
+  // Sync state when active tenant changes
+  useEffect(() => {
+    setOrders(tenantOrders)
+    setReviews(tenantReviews)
+    if (tenantProducts.length > 0) {
+      setCart([
+        {
+          product: tenantProducts[0],
+          selectedColor: tenantProducts[0].colors[0],
+          selectedSize: 'M',
+          selectedLining: 'No Lining',
+          selectedZip: 'None',
+          selectedLength: '44 inch',
+          quantity: 1,
+        },
+      ])
+      setWishlist([tenantProducts[0].id, tenantProducts[1]?.id || tenantProducts[0].id])
+    }
+  }, [activeTenant.id])
 
   const showToast = (msg: string) => {
     setToastMessage(msg)
@@ -4347,7 +4523,7 @@ export default function App() {
     const customizedProduct = {
       ...product,
       price: totalUnitPrice,
-      priceFormatted: `₹${totalUnitPrice.toLocaleString()}`,
+      priceFormatted: `${activeTenant.currencySymbol || '₹'}${totalUnitPrice.toLocaleString()}`,
     }
 
     setCart((prev) => {
@@ -4400,7 +4576,7 @@ export default function App() {
   const handleSaveReview = (newReviewData: { author: string; rating: number; title: string; comment: string }) => {
     const newRev: Review = {
       id: Date.now(),
-      productId: selectedProductId || 1,
+      productId: selectedProductId || tenantProducts[0]?.id || 1,
       author: newReviewData.author,
       rating: newReviewData.rating,
       date: 'Just now',
@@ -4412,16 +4588,18 @@ export default function App() {
   }
 
   const rawSubtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0)
-  const selectedProduct = PRODUCTS.find((p) => p.id === selectedProductId) || PRODUCTS[0]
+  const selectedProduct = tenantProducts.find((p) => p.id === selectedProductId) || tenantProducts[0] || PRODUCTS[0]
 
   return (
     <div className="min-h-screen bg-stone-50/20 text-black font-sans antialiased relative selection:bg-rose-100 selection:text-black">
       {/* Dynamic Ambient Background & Interactive Breeze Simulation */}
       <InteractiveBackground />
 
-      {showAnnouncement && <AnnouncementBar onDismiss={() => setShowAnnouncement(false)} />}
+      {showAnnouncement && <AnnouncementBar tenant={activeTenant} onDismiss={() => setShowAnnouncement(false)} />}
 
       <Navigation
+        tenant={activeTenant}
+        products={tenantProducts}
         cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
         wishlistCount={wishlist.length}
         user={user}
@@ -4440,22 +4618,38 @@ export default function App() {
       <main>
         {view === 'home' && (
           <>
-            <HeroSection onShopClick={() => handleNavigate('catalog', 'all')} />
-            <TrustBar />
+            <HeroSection tenant={activeTenant} onShopClick={() => handleNavigate('catalog', 'all')} />
+            <TrustBar tenant={activeTenant} />
             <BestsellersSection
+              tenant={activeTenant}
+              products={tenantProducts}
               wishlist={wishlist}
               onToggleWishlist={handleToggleWishlist}
               onSelectProduct={handleSelectProduct}
             />
-            <ShopByCategorySection onSelectCategory={(cat) => handleNavigate('catalog', cat)} />
-            <LeggingsFabricMatrix onSelectProduct={handleSelectProduct} />
-            <ActivityTriptych onSelectProduct={handleSelectProduct} />
-            <MissionBlock onShopClick={() => handleNavigate('catalog', 'all')} />
+            <ShopByCategorySection
+              tenant={activeTenant}
+              products={tenantProducts}
+              onSelectCategory={(cat) => handleNavigate('catalog', cat)}
+            />
+            <LeggingsFabricMatrix
+              tenant={activeTenant}
+              products={tenantProducts}
+              onSelectProduct={handleSelectProduct}
+            />
+            <ActivityTriptych
+              tenant={activeTenant}
+              products={tenantProducts}
+              onSelectProduct={handleSelectProduct}
+            />
+            <MissionBlock tenant={activeTenant} onShopClick={() => handleNavigate('catalog', 'all')} />
           </>
         )}
 
         {view === 'catalog' && (
           <CatalogPage
+            tenant={activeTenant}
+            products={tenantProducts}
             categoryFilter={categoryFilter}
             wishlist={wishlist}
             onToggleWishlist={handleToggleWishlist}
@@ -4465,7 +4659,9 @@ export default function App() {
 
         {view === 'pdp' && (
           <ProductDetailPage
+            tenant={activeTenant}
             product={selectedProduct}
+            products={tenantProducts}
             wishlist={wishlist}
             reviews={reviews}
             onToggleWishlist={handleToggleWishlist}
@@ -4477,10 +4673,12 @@ export default function App() {
         )}
       </main>
 
-      <Footer />
+      <Footer tenant={activeTenant} />
 
       {/* Mobile Drawer Navigation */}
       <MobileMenuDrawer
+        tenant={activeTenant}
+        products={tenantProducts}
         isOpen={isMobileMenuOpen}
         onClose={() => setIsMobileMenuOpen(false)}
         onNavigate={handleNavigate}
@@ -4496,6 +4694,8 @@ export default function App() {
 
       {/* Wishlist Slide-over Drawer */}
       <WishlistDrawer
+        tenant={activeTenant}
+        products={tenantProducts}
         isOpen={isWishlistOpen}
         onClose={() => setIsWishlistOpen(false)}
         wishlistIds={wishlist}
@@ -4551,6 +4751,7 @@ export default function App() {
 
       {/* About Brand Modal */}
       <AboutModal
+        tenant={activeTenant}
         isOpen={isAboutOpen}
         onClose={() => setIsAboutOpen(false)}
         onShopClick={() => {
@@ -4561,6 +4762,7 @@ export default function App() {
 
       {/* Contact Customer Care Modal */}
       <ContactModal
+        tenant={activeTenant}
         isOpen={isContactOpen}
         onClose={() => setIsContactOpen(false)}
         onSuccessMessage={(msg) => showToast(msg)}
@@ -4568,6 +4770,8 @@ export default function App() {
 
       {/* Interactive Search Overlay */}
       <SearchOverlay
+        tenant={activeTenant}
+        products={tenantProducts}
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
         onSelectProduct={handleSelectProduct}
@@ -4583,3 +4787,4 @@ export default function App() {
     </div>
   )
 }
+
