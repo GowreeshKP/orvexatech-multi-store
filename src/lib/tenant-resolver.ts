@@ -20,28 +20,41 @@ const RESERVED_SUBDOMAINS = ['admin', 'app', 'api', 'www', 'mail', 'staging']
  *   (default)         → 'storefront'
  */
 export function resolveApplicationLayer(): ApplicationLayer {
-  if (typeof window === 'undefined') return 'storefront'
+  if (typeof window === 'undefined') return 'admin'
 
   const params = new URLSearchParams(window.location.search)
   const panel = params.get('panel') || params.get('layer') || params.get('view')
+
   if (panel === 'admin' || params.get('admin') === 'true') return 'admin'
   if (panel === 'dashboard' || panel === 'seller' || params.get('seller') === 'true') return 'dashboard'
+  if (panel === 'storefront' || panel === 'store') return 'storefront'
 
   const path = window.location.pathname.toLowerCase()
   if (path === '/admin' || path.startsWith('/admin/')) return 'admin'
   if (path === '/dashboard' || path.startsWith('/dashboard/') || path === '/seller' || path.startsWith('/seller/')) return 'dashboard'
+  if (path.startsWith('/store/') || path.startsWith('/stores/')) return 'storefront'
+
+  // If explicit tenant or store param is provided in URL, load that tenant's storefront
+  if (params.get('tenant') || params.get('store')) {
+    return 'storefront'
+  }
 
   const hostname = window.location.hostname
 
-  // Production: use subdomain
+  // Production: check subdomain
   const parts = hostname.split('.')
   if (parts.length >= 3) {
-    const sub = parts[0]
+    const sub = parts[0].toLowerCase()
     if (sub === 'admin') return 'admin'
     if (sub === 'app' || sub === 'seller' || sub === 'merchant') return 'dashboard'
+    if (!RESERVED_SUBDOMAINS.includes(sub)) {
+      // Subdomain is a specific tenant store (e.g. lunar.orvexatech.com, silkhaus.orvexatech.com)
+      return 'storefront'
+    }
   }
 
-  return 'storefront'
+  // Root platform default: Launch Orvexa Tech Multi-Tenant Super Admin & Platform Console!
+  return 'admin'
 }
 
 /**

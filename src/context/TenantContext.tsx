@@ -81,18 +81,26 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     loadTenant(slug)
   }
 
-  const switchLayer = (newLayer: ApplicationLayer) => {
+  const switchLayer = (newLayer: ApplicationLayer, tenantSlug?: string) => {
     const url = new URL(window.location.href)
     if (newLayer === 'storefront') {
       url.searchParams.delete('panel')
       url.searchParams.delete('admin')
       url.searchParams.delete('layer')
       url.searchParams.delete('seller')
+      const targetSlug = tenantSlug || tenant?.slug || 'lunar'
+      url.searchParams.set('tenant', targetSlug)
       if (url.pathname === '/admin' || url.pathname === '/dashboard' || url.pathname === '/seller') {
         url.pathname = '/'
       }
+      loadTenant(targetSlug)
+    } else if (newLayer === 'dashboard') {
+      url.searchParams.set('panel', 'dashboard')
+      if (tenantSlug) url.searchParams.set('tenant', tenantSlug)
     } else {
-      url.searchParams.set('panel', newLayer)
+      url.searchParams.delete('tenant')
+      url.searchParams.delete('store')
+      url.searchParams.set('panel', 'admin')
     }
     window.history.pushState({}, '', url.toString())
     setLayer(newLayer)

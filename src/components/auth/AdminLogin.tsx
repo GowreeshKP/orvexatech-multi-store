@@ -143,13 +143,13 @@ export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
           <span className="text-[10px] font-mono text-white/30">v2.4 Enterprise</span>
         </div>
 
-        {/* Back Link */}
+        {/* Storefront Link */}
         <div className="mt-6 text-center">
           <a
-            href="/"
+            href="/?tenant=lunar"
             className="text-xs text-white/40 hover:text-white transition-colors inline-flex items-center gap-1.5"
           >
-            <span>← Return to Storefront</span>
+            <span>🏬 View Tenant Storefront (The Lunar Clothing) →</span>
           </a>
         </div>
       </div>
