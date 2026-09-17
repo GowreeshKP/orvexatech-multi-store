@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import DashboardApp from './layers/DashboardApp'
 import AdminApp from './layers/AdminApp'
-import { useApplicationLayer, useTenant } from './context/TenantContext'
+import { useApplicationLayer, useTenant, useSwitchLayer } from './context/TenantContext'
 import { mockStore } from './api/mock-store'
 import { MOCK_TENANTS } from './data/mock-tenants'
 import type { TenantConfig } from './types/tenant'
@@ -523,6 +523,7 @@ const INITIAL_REVIEWS: Review[] = [
 
 // --- INTERACTIVE LUXURY AMBIENT BACKGROUND SYSTEM ---
 function InteractiveBackground() {
+  const switchLayer = useSwitchLayer()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const spotlightRef = useRef<HTMLDivElement | null>(null)
   const [breezeActive, setBreezeActive] = useState(true)
@@ -748,8 +749,8 @@ function InteractiveBackground() {
         </div>
       </div>
 
-      {/* 5. Client Interactive Breeze Control Pill (Bottom Left) */}
-      <div className="fixed bottom-6 left-6 z-40">
+      {/* 5. Client Interactive Breeze Control Pill & Orvexa Platform Switcher (Bottom Left) */}
+      <div className="fixed bottom-6 left-6 z-40 flex items-center gap-2">
         <button
           onClick={() => setBreezeActive(!breezeActive)}
           className="flex items-center gap-2 bg-white/85 backdrop-blur-md border border-black/15 shadow-lg hover:border-black text-black px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all hover:scale-105 active:scale-95 cursor-pointer select-none"
@@ -757,6 +758,15 @@ function InteractiveBackground() {
         >
           <span className={`w-2 h-2 rounded-full ${breezeActive ? 'bg-emerald-500 animate-pulse' : 'bg-stone-300'}`} />
           <span>{breezeActive ? '✨ Floating Breeze: Active' : '✨ Floating Breeze: Paused'}</span>
+        </button>
+
+        <button
+          onClick={() => switchLayer('admin')}
+          className="flex items-center gap-1.5 bg-black hover:bg-stone-800 text-white px-3.5 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-xl border border-white/20 backdrop-blur-md"
+          title="Go to Orvexa Multi-Tenant Admin Console"
+        >
+          <span className="text-amber-400">👑</span>
+          <span>ORVEXA ADMIN</span>
         </button>
       </div>
     </>
@@ -808,6 +818,7 @@ function AnnouncementBar({
   tenant?: TenantConfig | null
   onDismiss: () => void
 }) {
+  const switchLayer = useSwitchLayer()
   const brandName = tenant?.brandName || 'The Lunar Clothing'
   const customMessages = tenant?.theme?.announcementMessages
 
@@ -838,13 +849,23 @@ function AnnouncementBar({
         ))}
       </div>
 
-      <button
-        onClick={onDismiss}
-        className="absolute right-3 top-1/2 -translate-y-1/2 bg-[#0055FF] pl-3 pr-1 text-white/80 hover:text-white text-sm font-light leading-none z-20 cursor-pointer"
-        aria-label="Dismiss announcement"
-      >
-        ✕
-      </button>
+      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 z-20">
+        <button
+          onClick={() => switchLayer('admin')}
+          className="hidden sm:inline-flex items-center gap-1 bg-black/40 hover:bg-black/70 text-white border border-white/30 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider cursor-pointer transition-all shadow-sm"
+          title="Go to Orvexa Multi-Tenant Admin"
+        >
+          <span>👑</span>
+          <span>ORVEXA ADMIN</span>
+        </button>
+        <button
+          onClick={onDismiss}
+          className="bg-[#0055FF] pl-2 pr-1 text-white/80 hover:text-white text-sm font-light leading-none cursor-pointer"
+          aria-label="Dismiss announcement"
+        >
+          ✕
+        </button>
+      </div>
     </div>
   )
 }
@@ -883,6 +904,7 @@ function Navigation({
   onNavigate: (view: 'home' | 'catalog', category?: string) => void
   currentCategory: string
 }) {
+  const switchLayer = useSwitchLayer()
   const [megaOpen, setMegaOpen] = useState(false)
 
   // Derive unique categories from products
@@ -1016,6 +1038,14 @@ function Navigation({
             >
               CONTACT
             </button>
+            <button
+              onClick={() => switchLayer('admin')}
+              className="flex items-center gap-1.5 text-black hover:text-white bg-stone-100 hover:bg-black px-2.5 py-1 rounded-xs border border-black/20 hover:border-black transition-all cursor-pointer font-bold tracking-wider text-[11px]"
+              title="Go to Orvexa Multi-Tenant Admin Console"
+            >
+              <span className="text-amber-500">👑</span>
+              <span>ORVEXA ADMIN</span>
+            </button>
           </nav>
         </div>
 
@@ -1132,6 +1162,7 @@ function MobileMenuDrawer({
 }) {
   if (!isOpen) return null
 
+  const switchLayer = useSwitchLayer()
   const safeProducts = products || PRODUCTS
   const categories = Array.from(new Set(safeProducts.map((p) => p.category)))
 
@@ -1212,6 +1243,13 @@ function MobileMenuDrawer({
               className="w-full flex items-center justify-center gap-2 bg-black text-white py-2.5 text-xs font-bold tracking-widest uppercase hover:bg-stone-800 cursor-pointer"
             >
               ♥ MY WISHLIST ({wishlistCount})
+            </button>
+
+            <button
+              onClick={() => { onClose(); switchLayer('admin') }}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-700 to-indigo-700 text-white py-2.5 text-xs font-bold tracking-widest uppercase hover:opacity-90 cursor-pointer shadow-md"
+            >
+              👑 ORVEXA MULTI-TENANT ADMIN
             </button>
           </div>
         </div>
@@ -3072,6 +3110,7 @@ function AuthModal({
   onClose: () => void
   onLoginSuccess: (user: UserAccount, isNew?: boolean) => void
 }) {
+  const switchLayer = useSwitchLayer()
   const [tab, setTab] = useState<'signin' | 'signup'>('signin')
   const [signInEmail, setSignInEmail] = useState('priya.sharma@example.com')
   const [signInPassword, setSignInPassword] = useState('lunar123')
@@ -3410,6 +3449,37 @@ function AuthModal({
               )}
             </div>
           )}
+        </div>
+
+        {/* Platform & Merchant Portal Direct Switcher */}
+        <div className="bg-stone-100 border-t border-black/10 p-4">
+          <p className="text-[10px] font-mono tracking-widest text-black/60 uppercase text-center mb-2.5 font-bold">
+            PLATFORM MANAGEMENT & STORE ADMIN
+          </p>
+          <div className="grid grid-cols-2 gap-2.5">
+            <button
+              onClick={() => {
+                onClose()
+                switchLayer('admin')
+              }}
+              className="bg-black hover:bg-stone-800 text-white text-[11px] font-bold py-2.5 px-3 rounded-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all uppercase tracking-wider"
+              title="Open Orvexa Multi-Tenant Super Admin Console"
+            >
+              <span className="text-amber-400">👑</span>
+              <span>Orvexa Admin</span>
+            </button>
+            <button
+              onClick={() => {
+                onClose()
+                switchLayer('dashboard')
+              }}
+              className="bg-white hover:bg-stone-50 border border-black/20 text-black text-[11px] font-bold py-2.5 px-3 rounded-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-all uppercase tracking-wider"
+              title="Open Seller / Merchant Dashboard"
+            >
+              <span>🏬</span>
+              <span>Seller Portal</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -4295,27 +4365,36 @@ function CatalogPage({
 
 // 18. FOOTER COMPONENT
 function Footer({ tenant }: { tenant?: TenantConfig }) {
+  const switchLayer = useSwitchLayer()
   const brandName = tenant?.name || 'THE LUNAR CLOTHING'
   const brandTagline = tenant?.tagline || 'Handcrafted 100% soft cotton maxis, artisanal block prints, and festive dresses with functional side pockets.'
   const shippingText = tenant?.contact?.shippingThresholdFormatted ? `Free Shipping over ${tenant.contact.shippingThresholdFormatted}` : 'Free Shipping over ₹999'
 
   return (
-    <footer className="bg-black text-white pt-20 pb-12 border-t border-white/10 select-none">
+    <footer className="bg-black text-white pt-16 pb-12 border-t border-white/10">
       <div className="max-w-screen-2xl mx-auto px-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16">
-          <div className="md:col-span-2">
-            <div className="flex items-center gap-3.5 mb-4">
-              <BrandLogo tenant={tenant} className="h-9 w-auto" />
-              <h3 className="text-2xl md:text-3xl font-bold tracking-[0.2em] font-sans uppercase">{brandName}</h3>
-            </div>
-            <p className="text-white/60 text-sm max-w-sm mb-6 leading-relaxed">
+          <div>
+            <h3 className="text-lg font-serif tracking-wider uppercase mb-4">{brandName}</h3>
+            <p className="text-xs text-white/60 leading-relaxed mb-6">
               {brandTagline}
             </p>
-            <form onSubmit={(e) => e.preventDefault()} className="flex max-w-md border-b border-white/30 pb-2">
+            <div className="flex gap-4 text-white/60">
+              <span className="hover:text-white cursor-pointer">Instagram</span>
+              <span className="hover:text-white cursor-pointer">WhatsApp</span>
+              <span className="hover:text-white cursor-pointer">Pinterest</span>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-xs font-bold tracking-widest uppercase text-white/40 mb-4">JOIN THE ATELIER</h4>
+            <p className="text-xs text-white/60 mb-4">Subscribe for private trunk show access and new seasonal drops.</p>
+            <form onSubmit={(e) => { e.preventDefault(); alert('Subscribed!') }} className="flex border-b border-white/20 pb-2">
               <input
                 type="email"
-                placeholder="ENTER YOUR EMAIL FOR 15% OFF"
-                className="bg-transparent text-xs text-white placeholder-white/40 flex-1 outline-none uppercase tracking-widest"
+                placeholder="YOUR EMAIL"
+                className="bg-transparent text-xs w-full outline-none text-white placeholder-white/40"
+                required
               />
               <button type="submit" className="text-xs font-bold uppercase tracking-widest text-white/80 hover:text-white cursor-pointer">
                 JOIN →
@@ -4335,41 +4414,25 @@ function Footer({ tenant }: { tenant?: TenantConfig }) {
           </div>
 
           <div>
-            <h4 className="text-xs font-bold tracking-widest uppercase text-white/40 mb-4">COLLECTIONS</h4>
-            <ul className="space-y-2.5 text-xs text-white/70">
-              {tenant?.categories?.map((cat) => (
-                <li key={cat.id}><a href="#" className="hover:text-white">{cat.name}</a></li>
-              )) || (
-                <>
-                  <li><a href="#" className="hover:text-white">100% Soft Cotton Maxis</a></li>
-                  <li><a href="#" className="hover:text-white">Mul Chanderi Silk Dresses</a></li>
-                  <li><a href="#" className="hover:text-white">Kalamkari Handblock Print</a></li>
-                  <li><a href="#" className="hover:text-white">Handloom Cotton Series</a></li>
-                </>
-              )}
-            </ul>
-          </div>
-
-          <div>
             <h4 className="text-xs font-bold tracking-widest uppercase text-white/40 mb-4">PARTNER & PORTAL</h4>
             <ul className="space-y-2.5 text-xs text-white/70">
               <li>
-                <a
-                  href={`/?panel=dashboard&tenant=${tenant?.slug || 'lunar'}`}
-                  className="hover:text-white flex items-center gap-1.5 text-amber-300 font-semibold"
+                <button
+                  onClick={() => switchLayer('admin')}
+                  className="hover:text-white flex items-center gap-1.5 text-violet-300 font-semibold cursor-pointer"
                 >
-                  <span>🔐</span>
-                  <span>Seller Portal Login</span>
-                </a>
+                  <span>👑</span>
+                  <span>Orvexa Multi-Tenant Admin</span>
+                </button>
               </li>
               <li>
-                <a
-                  href="/?panel=admin"
-                  className="hover:text-white flex items-center gap-1.5 text-violet-300 font-semibold"
+                <button
+                  onClick={() => switchLayer('dashboard')}
+                  className="hover:text-white flex items-center gap-1.5 text-amber-300 font-semibold cursor-pointer"
                 >
-                  <span>🛡️</span>
-                  <span>Orvexa Tech Admin Hub</span>
-                </a>
+                  <span>🏬</span>
+                  <span>Seller Portal Dashboard</span>
+                </button>
               </li>
               <li><a href="#" className="hover:text-white">Merchant Application</a></li>
               <li><a href="#" className="hover:text-white">Brand Partnerships</a></li>

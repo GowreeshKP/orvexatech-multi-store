@@ -20,10 +20,16 @@ const RESERVED_SUBDOMAINS = ['admin', 'app', 'api', 'www', 'mail', 'staging']
  *   (default)         → 'storefront'
  */
 export function resolveApplicationLayer(): ApplicationLayer {
+  if (typeof window === 'undefined') return 'storefront'
+
   const params = new URLSearchParams(window.location.search)
-  const panel = params.get('panel')
-  if (panel === 'admin') return 'admin'
-  if (panel === 'dashboard') return 'dashboard'
+  const panel = params.get('panel') || params.get('layer') || params.get('view')
+  if (panel === 'admin' || params.get('admin') === 'true') return 'admin'
+  if (panel === 'dashboard' || panel === 'seller' || params.get('seller') === 'true') return 'dashboard'
+
+  const path = window.location.pathname.toLowerCase()
+  if (path === '/admin' || path.startsWith('/admin/')) return 'admin'
+  if (path === '/dashboard' || path.startsWith('/dashboard/') || path === '/seller' || path.startsWith('/seller/')) return 'dashboard'
 
   const hostname = window.location.hostname
 
@@ -32,7 +38,7 @@ export function resolveApplicationLayer(): ApplicationLayer {
   if (parts.length >= 3) {
     const sub = parts[0]
     if (sub === 'admin') return 'admin'
-    if (sub === 'app') return 'dashboard'
+    if (sub === 'app' || sub === 'seller' || sub === 'merchant') return 'dashboard'
   }
 
   return 'storefront'

@@ -14,6 +14,7 @@ interface TenantContextValue {
   layer: ApplicationLayer
   refreshTenant: () => void
   switchTenant: (slug: string) => void
+  switchLayer: (layer: ApplicationLayer) => void
 }
 
 const TenantContext = createContext<TenantContextValue>({
@@ -23,6 +24,7 @@ const TenantContext = createContext<TenantContextValue>({
   layer: 'storefront',
   refreshTenant: () => {},
   switchTenant: () => {},
+  switchLayer: () => {},
 })
 
 export function useTenant() {
@@ -31,6 +33,10 @@ export function useTenant() {
 
 export function useApplicationLayer(): ApplicationLayer {
   return useContext(TenantContext).layer
+}
+
+export function useSwitchLayer() {
+  return useContext(TenantContext).switchLayer
 }
 
 export function TenantProvider({ children }: { children: ReactNode }) {
@@ -73,6 +79,23 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     url.searchParams.set('tenant', slug)
     window.history.pushState({}, '', url.toString())
     loadTenant(slug)
+  }
+
+  const switchLayer = (newLayer: ApplicationLayer) => {
+    const url = new URL(window.location.href)
+    if (newLayer === 'storefront') {
+      url.searchParams.delete('panel')
+      url.searchParams.delete('admin')
+      url.searchParams.delete('layer')
+      url.searchParams.delete('seller')
+      if (url.pathname === '/admin' || url.pathname === '/dashboard' || url.pathname === '/seller') {
+        url.pathname = '/'
+      }
+    } else {
+      url.searchParams.set('panel', newLayer)
+    }
+    window.history.pushState({}, '', url.toString())
+    setLayer(newLayer)
   }
 
   useEffect(() => {
@@ -120,6 +143,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         layer,
         refreshTenant: () => loadTenant(),
         switchTenant,
+        switchLayer,
       }}
     >
       {children}
