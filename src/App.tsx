@@ -783,12 +783,16 @@ function BrandLogo({
   className?: string
   isWhiteText?: boolean
 }) {
-  if (tenant?.logo || tenant?.theme?.logoUrl) {
+  const [imgError, setImgError] = useState(false)
+  const logoSrc = tenant?.logo || tenant?.theme?.logoUrl
+
+  if (logoSrc && !imgError) {
     return (
       <img
-        src={tenant.logo || tenant.theme.logoUrl}
-        alt={tenant.brandName}
+        src={logoSrc}
+        alt={tenant?.brandName || 'Brand Logo'}
         className={className || "h-10 md:h-11 w-auto object-contain rounded-sm shadow-xs"}
+        onError={() => setImgError(true)}
       />
     )
   }
