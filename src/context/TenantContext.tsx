@@ -6,6 +6,7 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from '
 import type { TenantConfig } from '@/types/tenant'
 import { resolveTenantSlug, resolveApplicationLayer, type ApplicationLayer } from '@/lib/tenant-resolver'
 import { mockStore } from '@/api/mock-store'
+import { MOCK_TENANTS } from '@/data/mock-tenants'
 
 interface TenantContextValue {
   tenant: TenantConfig | null

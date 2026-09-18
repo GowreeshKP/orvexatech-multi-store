@@ -41,15 +41,22 @@ export function resolveApplicationLayer(): ApplicationLayer {
 
   const hostname = window.location.hostname
 
-  // Production: check subdomain
-  const parts = hostname.split('.')
-  if (parts.length >= 3) {
-    const sub = parts[0].toLowerCase()
-    if (sub === 'admin') return 'admin'
-    if (sub === 'app' || sub === 'seller' || sub === 'merchant') return 'dashboard'
-    if (!RESERVED_SUBDOMAINS.includes(sub)) {
-      // Subdomain is a specific tenant store (e.g. lunar.orvexatech.com, silkhaus.orvexatech.com)
-      return 'storefront'
+  // Skip subdomain detection for deployment preview platforms (Vercel, Netlify, GitHub Pages, Cloudflare Pages)
+  // These platforms use subdomains as part of their own URL scheme, not as tenant identifiers
+  const PREVIEW_PLATFORM_DOMAINS = ['vercel.app', 'netlify.app', 'github.io', 'pages.dev', 'cloudflareapps.com']
+  const isPreviewPlatform = PREVIEW_PLATFORM_DOMAINS.some(domain => hostname.endsWith('.' + domain) || hostname === domain)
+
+  if (!isPreviewPlatform) {
+    // Production: check subdomain (e.g. lunar.orvexatech.com, admin.orvexatech.com)
+    const parts = hostname.split('.')
+    if (parts.length >= 3) {
+      const sub = parts[0].toLowerCase()
+      if (sub === 'admin') return 'admin'
+      if (sub === 'app' || sub === 'seller' || sub === 'merchant') return 'dashboard'
+      if (!RESERVED_SUBDOMAINS.includes(sub)) {
+        // Subdomain is a specific tenant store (e.g. lunar.orvexatech.com, silkhaus.orvexatech.com)
+        return 'storefront'
+      }
     }
   }
 
