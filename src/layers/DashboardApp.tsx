@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
-import { useTenant } from '@/context/TenantContext'
+import { useTenant, useSwitchLayer } from '@/context/TenantContext'
 import { useDashboardStats, useDashboardProducts, useTenantOrders, useThemeCustomizer } from '@/api/hooks'
 import { authService, type SellerSession } from '@/api/auth'
 import { mockStore } from '@/api/mock-store'
@@ -94,6 +94,7 @@ const HERO_PHOTO_PRESETS = [
 
 export default function DashboardApp() {
   const { tenant, loading, switchTenant } = useTenant()
+  const switchLayer = useSwitchLayer()
   const [session, setSession] = useState<SellerSession | null>(() => authService.getSellerSession())
   const [activeView, setActiveView] = useState<DashboardView>('overview')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -241,13 +242,14 @@ export default function DashboardApp() {
           </div>
 
           <div className="flex items-center gap-3">
-            <a
-              href={`/?tenant=${tenant?.slug || 'lunar'}`}
-              className="text-xs bg-black text-white hover:bg-stone-800 font-bold px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+            <button
+              onClick={() => switchLayer('storefront', tenant?.slug || 'lunar')}
+              className="text-xs bg-black text-white hover:bg-stone-800 font-bold px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+              title="View your live storefront with latest saved changes"
             >
               <span>🏬</span>
               <span>Open Storefront ↗</span>
-            </a>
+            </button>
             <button
               onClick={handleLogout}
               className="text-xs bg-stone-100 hover:bg-red-50 hover:text-red-700 text-black font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 border border-black/10 cursor-pointer"
@@ -1286,6 +1288,9 @@ function ProductFormModal({
 // =====================================================
 function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
   const { theme, tenant, updateTheme, updateTenant } = useThemeCustomizer()
+  const { refreshTenant } = useTenant()
+  const switchLayer = useSwitchLayer()
+  const [isSaved, setIsSaved] = useState(false)
 
   const [heroImage, setHeroImage] = useState(
     theme?.heroImage ||
@@ -1414,7 +1419,9 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
       },
     })
 
-    onToast('Homepage banner, branding & theme published to live store!')
+    refreshTenant()
+    setIsSaved(true)
+    onToast('✅ Homepage banner, branding & theme published to live store!')
   }
 
   return (
@@ -1428,14 +1435,39 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
           </p>
         </div>
 
-        <button
-          onClick={handleSaveAll}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs tracking-widest uppercase px-6 py-3 rounded-lg transition-all cursor-pointer shadow-md flex items-center gap-2"
-        >
-          <span>✓</span>
-          <span>SAVE & PUBLISH CHANGES</span>
-        </button>
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => switchLayer('storefront', tenant?.slug || 'lunar')}
+            className="bg-black hover:bg-stone-800 text-white font-bold text-xs tracking-wider uppercase px-4 py-3 rounded-lg transition-all cursor-pointer shadow-sm flex items-center gap-2"
+            title="Open storefront to view your latest published changes"
+          >
+            <span>🏬</span>
+            <span>View Live Storefront ↗</span>
+          </button>
+          <button
+            onClick={handleSaveAll}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs tracking-widest uppercase px-6 py-3 rounded-lg transition-all cursor-pointer shadow-md flex items-center gap-2"
+          >
+            <span>✓</span>
+            <span>SAVE & PUBLISH CHANGES</span>
+          </button>
+        </div>
       </div>
+
+      {isSaved && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2 text-emerald-800 text-xs font-semibold">
+            <span className="text-base">🎉</span>
+            <span>Changes successfully published! Your storefront is now displaying the updated banner, logo, and theme.</span>
+          </div>
+          <button
+            onClick={() => switchLayer('storefront', tenant?.slug || 'lunar')}
+            className="text-xs bg-emerald-700 text-white hover:bg-emerald-800 font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+          >
+            Open Storefront Now ↗
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left Column: Form Controls (7 cols) */}
@@ -2181,10 +2213,13 @@ function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardV
         logo: finalLogo,
         theme: { ...tenant.theme, logoUrl: finalLogo },
       })
+      mockStore.updateTheme(tenant.id, {
+        logoUrl: finalLogo,
+      })
       refreshTenant()
       setIsSavingLogo(false)
       onToast('✅ Brand logo saved! It is now live on your storefront.')
-    }, 800)
+    }, 400)
   }
 
   const handleRemoveLogo = () => {
@@ -2193,6 +2228,9 @@ function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardV
     mockStore.updateTenant(tenant.id, {
       logo: '',
       theme: { ...tenant.theme, logoUrl: '' },
+    })
+    mockStore.updateTheme(tenant.id, {
+      logoUrl: '',
     })
     refreshTenant()
     onToast('Logo removed. Storefront will now show your brand initial.')

@@ -7,6 +7,14 @@ import type { TenantConfig, TenantApplication, PlatformStats, DashboardStats, Th
 import type { Product, Review, TrackedOrder } from '@/types'
 import { MOCK_TENANTS, MOCK_APPLICATIONS, MOCK_TENANT_DATABASES, type TenantDatabase } from '@/data/mock-tenants'
 
+const STORAGE_KEY_TENANTS = 'orvexa_tenants_v1'
+const STORAGE_KEY_DATABASES = 'orvexa_databases_v1'
+const STORAGE_KEY_APPLICATIONS = 'orvexa_applications_v1'
+
+function isBrowser(): boolean {
+  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
+}
+
 class MockPlatformStore {
   // --- MASTER DATABASE ---
   private tenants: Map<string, TenantConfig>
@@ -30,6 +38,65 @@ class MockPlatformStore {
         customers: [...db.customers],
       })
     })
+
+    // Hydrate from localStorage if running in browser
+    this.reloadFromStorage()
+
+    if (isBrowser()) {
+      window.addEventListener('storage', (e) => {
+        if (e.key === STORAGE_KEY_TENANTS || e.key === STORAGE_KEY_DATABASES) {
+          this.reloadFromStorage()
+        }
+      })
+    }
+  }
+
+  // Persist all state to localStorage so changes survive page reload & cross-tab navigation
+  public persist(): void {
+    if (!isBrowser()) return
+    try {
+      const tenantsList = Array.from(this.tenants.values())
+      localStorage.setItem(STORAGE_KEY_TENANTS, JSON.stringify(tenantsList))
+
+      const dbEntries = Array.from(this.tenantDatabases.entries())
+      localStorage.setItem(STORAGE_KEY_DATABASES, JSON.stringify(dbEntries))
+
+      const appsList = Array.from(this.applications.values())
+      localStorage.setItem(STORAGE_KEY_APPLICATIONS, JSON.stringify(appsList))
+
+      window.dispatchEvent(new CustomEvent('orvexa:store-updated', { detail: { timestamp: Date.now() } }))
+    } catch (e) {
+      console.warn('Failed to persist mockStore to localStorage', e)
+    }
+  }
+
+  public reloadFromStorage(): void {
+    if (!isBrowser()) return
+    try {
+      const storedTenants = localStorage.getItem(STORAGE_KEY_TENANTS)
+      if (storedTenants) {
+        const parsed: TenantConfig[] = JSON.parse(storedTenants)
+        parsed.forEach((t) => {
+          this.tenants.set(t.id, t)
+        })
+      }
+      const storedDbs = localStorage.getItem(STORAGE_KEY_DATABASES)
+      if (storedDbs) {
+        const parsed: [string, TenantDatabase][] = JSON.parse(storedDbs)
+        parsed.forEach(([id, db]) => {
+          this.tenantDatabases.set(id, db)
+        })
+      }
+      const storedApps = localStorage.getItem(STORAGE_KEY_APPLICATIONS)
+      if (storedApps) {
+        const parsed: TenantApplication[] = JSON.parse(storedApps)
+        parsed.forEach((a) => {
+          this.applications.set(a.id, a)
+        })
+      }
+    } catch (e) {
+      console.warn('Failed to reload mockStore from localStorage', e)
+    }
   }
 
   // =================================================================
@@ -255,6 +322,7 @@ class MockPlatformStore {
       })
     }
 
+    this.persist()
     return newTenant
   }
 
@@ -262,6 +330,7 @@ class MockPlatformStore {
     const app = this.applications.get(applicationId)
     if (app) {
       app.status = 'rejected'
+      this.persist()
     }
   }
 
@@ -269,6 +338,7 @@ class MockPlatformStore {
     const tenant = this.tenants.get(tenantId)
     if (tenant) {
       tenant.status = 'suspended'
+      this.persist()
     }
   }
 
@@ -276,6 +346,7 @@ class MockPlatformStore {
     const tenant = this.tenants.get(tenantId)
     if (tenant) {
       tenant.status = 'active'
+      this.persist()
     }
   }
 
@@ -286,6 +357,7 @@ class MockPlatformStore {
       tenant.plan = plan
       tenant.subscription.plan = plan
       tenant.subscription.pricePerMonth = pricing[plan]
+      this.persist()
     }
   }
 
@@ -295,6 +367,7 @@ class MockPlatformStore {
       const invoice = tenant.subscription.invoices.find((i) => i.id === invoiceId)
       if (invoice) {
         invoice.status = 'paid'
+        this.persist()
       }
     }
   }
@@ -325,7 +398,14 @@ class MockPlatformStore {
   // =================================================================
 
   private getDB(tenantId: string): TenantDatabase {
-    const db = this.tenantDatabases.get(tenantId)
+    let db = this.tenantDatabases.get(tenantId)
+    if (!db) {
+      // Check if tenantId was passed as slug
+      const tenant = Array.from(this.tenants.values()).find((t) => t.slug === tenantId || t.id === tenantId)
+      if (tenant) {
+        db = this.tenantDatabases.get(tenant.id)
+      }
+    }
     if (!db) throw new Error(`No database found for tenant ${tenantId}`)
     return db
   }
@@ -337,6 +417,7 @@ class MockPlatformStore {
 
   addProduct(tenantId: string, product: Product): void {
     this.getDB(tenantId).products.push(product)
+    this.persist()
   }
 
   updateProduct(tenantId: string, productId: number, data: Partial<Product>): void {
@@ -344,12 +425,14 @@ class MockPlatformStore {
     const idx = db.products.findIndex((p) => p.id === productId)
     if (idx !== -1) {
       db.products[idx] = { ...db.products[idx], ...data }
+      this.persist()
     }
   }
 
   deleteProduct(tenantId: string, productId: number): void {
     const db = this.getDB(tenantId)
     db.products = db.products.filter((p) => p.id !== productId)
+    this.persist()
   }
 
   // Orders
@@ -359,6 +442,7 @@ class MockPlatformStore {
 
   placeOrder(tenantId: string, order: TrackedOrder): void {
     this.getDB(tenantId).orders.unshift(order)
+    this.persist()
   }
 
   // Reviews
@@ -368,25 +452,54 @@ class MockPlatformStore {
 
   submitReview(tenantId: string, review: Review): void {
     this.getDB(tenantId).reviews.unshift(review)
+    this.persist()
   }
 
   // Theme & Tenant Profile
-  updateTheme(tenantId: string, theme: Partial<ThemeConfig>): void {
-    const tenant = this.tenants.get(tenantId)
+  updateTheme(tenantIdOrSlug: string, theme: Partial<ThemeConfig>): void {
+    let tenant = this.tenants.get(tenantIdOrSlug)
+    if (!tenant) {
+      tenant = Array.from(this.tenants.values()).find((t) => t.slug === tenantIdOrSlug || t.id === tenantIdOrSlug)
+    }
     if (tenant) {
       tenant.theme = { ...tenant.theme, ...theme }
       if (theme.tagline) tenant.tagline = theme.tagline
       if (theme.aboutStory) tenant.aboutStory = theme.aboutStory
-      if (theme.heroHeadline) tenant.theme.heroHeadline = theme.heroHeadline
+      if (theme.heroHeadline) {
+        tenant.theme.heroHeadline = theme.heroHeadline
+        tenant.tagline = theme.heroHeadline
+      }
+      if (theme.heroImage) {
+        tenant.theme.heroImage = theme.heroImage
+      }
+      if (theme.logoUrl) {
+        tenant.logo = theme.logoUrl
+        tenant.theme.logoUrl = theme.logoUrl
+      }
+      this.tenants.set(tenant.id, { ...tenant })
+      this.persist()
     }
   }
 
-  updateTenant(tenantId: string, updates: Partial<TenantConfig>): void {
-    const tenant = this.tenants.get(tenantId)
+  updateTenant(tenantIdOrSlug: string, updates: Partial<TenantConfig>): void {
+    let tenant = this.tenants.get(tenantIdOrSlug)
+    if (!tenant) {
+      tenant = Array.from(this.tenants.values()).find((t) => t.slug === tenantIdOrSlug || t.id === tenantIdOrSlug)
+    }
     if (tenant) {
       Object.assign(tenant, updates)
       if (updates.name && !updates.brandName) tenant.brandName = updates.name
       if (updates.brandName && !updates.name) tenant.name = updates.brandName
+      if (updates.logo) {
+        if (!tenant.theme) tenant.theme = {} as any
+        tenant.theme.logoUrl = updates.logo
+        tenant.logo = updates.logo
+      }
+      if (updates.theme) {
+        tenant.theme = { ...tenant.theme, ...updates.theme }
+      }
+      this.tenants.set(tenant.id, { ...tenant })
+      this.persist()
     }
   }
 

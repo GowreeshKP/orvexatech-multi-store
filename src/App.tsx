@@ -786,6 +786,10 @@ function BrandLogo({
   const [imgError, setImgError] = useState(false)
   const logoSrc = tenant?.logo || tenant?.theme?.logoUrl
 
+  useEffect(() => {
+    setImgError(false)
+  }, [logoSrc])
+
   if (logoSrc && !imgError) {
     return (
       <img
@@ -1400,6 +1404,14 @@ function HeroSection({
           >
             {ctaText}
           </button>
+          {tenant?.theme?.secondaryCtaText && (
+            <button
+              onClick={onShopClick}
+              className="bg-white/10 backdrop-blur-xs text-white hover:bg-white hover:text-black font-bold text-xs tracking-[0.2em] uppercase px-8 py-4 border border-white/60 transition-all duration-300 active:scale-95 cursor-pointer"
+            >
+              {tenant.theme.secondaryCtaText}
+            </button>
+          )}
         </div>
       </div>
     </section>

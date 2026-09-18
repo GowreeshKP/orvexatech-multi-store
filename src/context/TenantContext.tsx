@@ -2,11 +2,16 @@
 // Provides tenant configuration to the entire component tree
 // and dynamically injects CSS variables for theming
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import type { TenantConfig } from '@/types/tenant'
 import { resolveTenantSlug, resolveApplicationLayer, type ApplicationLayer } from '@/lib/tenant-resolver'
 import { mockStore } from '@/api/mock-store'
 import { MOCK_TENANTS } from '@/data/mock-tenants'
+
+// Deep-clone a tenant config so React detects nested theme changes
+function deepCloneTenant(config: TenantConfig): TenantConfig {
+  return JSON.parse(JSON.stringify(config))
+}
 
 interface TenantContextValue {
   tenant: TenantConfig | null
@@ -46,8 +51,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [layer, setLayer] = useState<ApplicationLayer>(() => resolveApplicationLayer())
 
-  const loadTenant = (customSlug?: string) => {
+  const loadTenant = useCallback((customSlug?: string) => {
     try {
+      // Reload any localStorage updates into mockStore first
+      mockStore.reloadFromStorage()
+
       const currentLayer = resolveApplicationLayer()
       setLayer(currentLayer)
 
@@ -55,13 +63,14 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       const config = mockStore.getTenantBySlug(slug)
 
       if (config) {
-        setTenant({ ...config })
+        // Deep-clone so nested theme object changes are detected by React
+        setTenant(deepCloneTenant(config))
         setError(null)
       } else {
         // If exact slug not found, fallback to lunar
         const fallback = mockStore.getTenantBySlug('lunar') || MOCK_TENANTS[0]
         if (fallback) {
-          setTenant({ ...fallback })
+          setTenant(deepCloneTenant(fallback))
           setError(null)
         } else {
           setError(`Store "${slug}" not found.`)
@@ -73,7 +82,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  const refreshTenant = useCallback((customSlug?: string) => {
+    loadTenant(customSlug)
+  }, [loadTenant])
 
   const switchTenant = (slug: string) => {
     const url = new URL(window.location.href)
@@ -94,16 +107,19 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       if (url.pathname === '/admin' || url.pathname === '/dashboard' || url.pathname === '/seller') {
         url.pathname = '/'
       }
+      window.history.pushState({}, '', url.toString())
       loadTenant(targetSlug)
     } else if (newLayer === 'dashboard') {
       url.searchParams.set('panel', 'dashboard')
       if (tenantSlug) url.searchParams.set('tenant', tenantSlug)
+      window.history.pushState({}, '', url.toString())
+      loadTenant(tenantSlug)
     } else {
       url.searchParams.delete('tenant')
       url.searchParams.delete('store')
       url.searchParams.set('panel', 'admin')
+      window.history.pushState({}, '', url.toString())
     }
-    window.history.pushState({}, '', url.toString())
     setLayer(newLayer)
   }
 
@@ -114,9 +130,20 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       loadTenant()
     }
 
+    const handleStoreUpdated = () => {
+      loadTenant()
+    }
+
     window.addEventListener('popstate', handleLocationChange)
-    return () => window.removeEventListener('popstate', handleLocationChange)
-  }, [])
+    window.addEventListener('storage', handleStoreUpdated)
+    window.addEventListener('orvexa:store-updated', handleStoreUpdated)
+
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange)
+      window.removeEventListener('storage', handleStoreUpdated)
+      window.removeEventListener('orvexa:store-updated', handleStoreUpdated)
+    }
+  }, [loadTenant])
 
   // Inject CSS variables into :root based on tenant theme
   useEffect(() => {
@@ -150,7 +177,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         loading,
         error,
         layer,
-        refreshTenant: () => loadTenant(),
+        refreshTenant,
         switchTenant,
         switchLayer,
       }}
