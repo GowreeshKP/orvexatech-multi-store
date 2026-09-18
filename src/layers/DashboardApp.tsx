@@ -2,6 +2,7 @@ import { useState, useRef, useMemo, useEffect } from 'react'
 import { useTenant } from '@/context/TenantContext'
 import { useDashboardStats, useDashboardProducts, useTenantOrders, useThemeCustomizer } from '@/api/hooks'
 import { authService, type SellerSession } from '@/api/auth'
+import { mockStore } from '@/api/mock-store'
 import SellerLogin from '@/components/auth/SellerLogin'
 import type { Product } from '@/types'
 import type { TenantConfig, ThemeConfig } from '@/types/tenant'
@@ -2128,15 +2129,246 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
 // =====================================================
 // 5. Store Settings & Subscription Plan
 // =====================================================
-// 5. Store Settings & Plan
-// =====================================================
 function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardView) => void; onToast: (msg: string) => void }) {
-  const { tenant } = useTenant()
+  const { tenant, refreshTenant } = useTenant()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Brand logo state
+  const [logoPreview, setLogoPreview] = useState<string>(tenant?.logo || tenant?.theme?.logoUrl || '')
+  const [logoUrl, setLogoUrl] = useState<string>(tenant?.logo || tenant?.theme?.logoUrl || '')
+  const [isUploadMode, setIsUploadMode] = useState(true)
+  const [isSavingLogo, setIsSavingLogo] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
 
   if (!tenant) return null
 
+  // Handle file upload — converts to base64 DataURL
+  const handleFileUpload = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      onToast('Please select an image file (PNG, JPG, SVG, WebP)')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      onToast('Image must be smaller than 5MB')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string
+      setLogoPreview(dataUrl)
+      setLogoUrl(dataUrl)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files[0]
+    if (file) handleFileUpload(file)
+  }
+
+  const handleSaveLogo = () => {
+    const finalLogo = isUploadMode ? logoPreview : logoUrl
+    if (!finalLogo) {
+      onToast('Please upload or enter a logo URL first')
+      return
+    }
+    setIsSavingLogo(true)
+    setTimeout(() => {
+      // Save to mockStore so storefront picks it up
+      mockStore.updateTenant(tenant.id, {
+        logo: finalLogo,
+        theme: { ...tenant.theme, logoUrl: finalLogo },
+      })
+      refreshTenant()
+      setIsSavingLogo(false)
+      onToast('✅ Brand logo saved! It is now live on your storefront.')
+    }, 800)
+  }
+
+  const handleRemoveLogo = () => {
+    setLogoPreview('')
+    setLogoUrl('')
+    mockStore.updateTenant(tenant.id, {
+      logo: '',
+      theme: { ...tenant.theme, logoUrl: '' },
+    })
+    refreshTenant()
+    onToast('Logo removed. Storefront will now show your brand initial.')
+  }
+
+  const currentLogo = isUploadMode ? logoPreview : logoUrl
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
+
+      {/* ── BRAND IDENTITY & LOGO ── */}
+      <div className="bg-white rounded-xl border border-black/8 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-black/8 flex items-center gap-3">
+          <span className="text-lg">🖼️</span>
+          <div>
+            <h3 className="text-sm font-bold tracking-wider uppercase text-black">Brand Identity & Logo</h3>
+            <p className="text-[11px] text-black/40 mt-0.5">Upload your store logo — it appears in the storefront header, product pages, and order emails.</p>
+          </div>
+        </div>
+
+        <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Left: Upload Controls */}
+          <div className="space-y-5">
+            {/* Mode Toggle */}
+            <div className="flex bg-stone-100 rounded-lg p-1 gap-1">
+              <button
+                onClick={() => setIsUploadMode(true)}
+                className={`flex-1 text-xs font-bold py-2 rounded-md transition-all cursor-pointer ${isUploadMode ? 'bg-white shadow-sm text-black' : 'text-black/40 hover:text-black'}`}
+              >
+                📁 Upload File
+              </button>
+              <button
+                onClick={() => setIsUploadMode(false)}
+                className={`flex-1 text-xs font-bold py-2 rounded-md transition-all cursor-pointer ${!isUploadMode ? 'bg-white shadow-sm text-black' : 'text-black/40 hover:text-black'}`}
+              >
+                🔗 Paste URL
+              </button>
+            </div>
+
+            {isUploadMode ? (
+              /* File Upload Drop Zone */
+              <div
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
+                  isDragging
+                    ? 'border-black bg-stone-50 scale-[1.02]'
+                    : 'border-black/20 hover:border-black/50 hover:bg-stone-50'
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(f) }}
+                />
+                <div className="text-3xl mb-3">{isDragging ? '📂' : '🖼️'}</div>
+                <p className="text-sm font-bold text-black/80">
+                  {isDragging ? 'Drop to upload' : 'Click or drag & drop your logo'}
+                </p>
+                <p className="text-xs text-black/40 mt-1.5">PNG, JPG, SVG, WebP — Max 5MB</p>
+                {logoPreview && isUploadMode && (
+                  <div className="mt-3 text-[11px] text-emerald-600 font-semibold">
+                    ✓ Logo loaded — click Save to apply
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* URL Input */
+              <div className="space-y-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-black/60">
+                  Logo Image URL
+                </label>
+                <input
+                  type="url"
+                  value={logoUrl}
+                  onChange={(e) => setLogoUrl(e.target.value)}
+                  placeholder="https://your-cdn.com/logo.png"
+                  className="w-full bg-stone-50 border border-black/15 focus:border-black rounded-lg px-4 py-3 text-xs text-black placeholder-black/25 outline-none transition-all font-mono"
+                />
+                <p className="text-[11px] text-black/40">
+                  Enter a public image URL (must be accessible via https://)
+                </p>
+              </div>
+            )}
+
+            {/* Save / Remove buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={handleSaveLogo}
+                disabled={isSavingLogo || !currentLogo}
+                className="flex-1 bg-black hover:bg-stone-800 disabled:opacity-40 text-white text-xs font-bold uppercase tracking-widest py-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+              >
+                {isSavingLogo ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <span>💾 Save Logo to Storefront</span>
+                )}
+              </button>
+              {(tenant.logo || tenant.theme?.logoUrl) && (
+                <button
+                  onClick={handleRemoveLogo}
+                  className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold px-4 py-3 rounded-xl transition-all cursor-pointer"
+                  title="Remove logo"
+                >
+                  🗑️
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Right: Live Preview */}
+          <div className="space-y-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-black/50">Live Storefront Preview</p>
+
+            {/* Header Preview */}
+            <div className="border border-black/10 rounded-xl overflow-hidden shadow-sm">
+              <div className="bg-white px-4 py-3 flex items-center gap-3 border-b border-black/8">
+                {currentLogo ? (
+                  <img
+                    src={currentLogo}
+                    alt="Logo preview"
+                    className="h-9 w-auto max-w-[140px] object-contain rounded"
+                    onError={() => onToast('⚠️ Could not load that image URL — check the link')}
+                  />
+                ) : (
+                  <div
+                    className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold shadow-xs"
+                    style={{ backgroundColor: tenant.theme?.primaryColor || '#111' }}
+                  >
+                    {tenant.brandName?.charAt(0) || 'S'}
+                  </div>
+                )}
+                <span className="font-serif font-bold text-sm uppercase tracking-widest text-black">
+                  {tenant.brandName}
+                </span>
+                <div className="ml-auto flex gap-4">
+                  <span className="text-[10px] text-black/40 font-bold uppercase">Collections</span>
+                  <span className="text-[10px] text-black/40 font-bold uppercase">About</span>
+                  <span className="text-[10px] text-black/40 font-bold uppercase">Contact</span>
+                </div>
+              </div>
+              <div
+                className="h-20 flex items-center justify-center"
+                style={{ backgroundColor: tenant.theme?.backgroundColor || '#FAFAF8' }}
+              >
+                <p className="text-xs text-black/25 italic">Storefront header preview</p>
+              </div>
+            </div>
+
+            {/* Current logo status */}
+            <div className="bg-stone-50 rounded-lg p-3.5 border border-black/8">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-black/40 mb-2">Current Logo Status</p>
+              {tenant.logo || tenant.theme?.logoUrl ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-500 font-bold text-sm">●</span>
+                  <span className="text-xs text-black/70 font-semibold">Custom logo active on storefront</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-500 font-bold text-sm">●</span>
+                  <span className="text-xs text-black/50">Using brand initial fallback — upload a logo to brand your store</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── STORE DOMAIN & ACCOUNT ── */}
       <div className="bg-white rounded-xl p-6 border border-black/8 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-bold tracking-wider uppercase text-black/50">Store Domain & Account</h3>
