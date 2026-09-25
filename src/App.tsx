@@ -5,6 +5,8 @@ import { useApplicationLayer, useTenant, useSwitchLayer } from './context/Tenant
 import { mockStore } from './api/mock-store'
 import { MOCK_TENANTS } from './data/mock-tenants'
 import type { TenantConfig } from './types/tenant'
+import AdminLoginModal from './components/auth/AdminLoginModal'
+import SellerLoginModal from './components/auth/SellerLoginModal'
 
 // --- THE LUNAR CLOTHING OFFICIAL PRODUCT DATASET ---
 export interface Product {
@@ -524,9 +526,7 @@ const INITIAL_REVIEWS: Review[] = [
 // --- INTERACTIVE LUXURY AMBIENT BACKGROUND SYSTEM ---
 function InteractiveBackground() {
   const switchLayer = useSwitchLayer()
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const spotlightRef = useRef<HTMLDivElement | null>(null)
-  const [breezeActive, setBreezeActive] = useState(true)
   const mouseTargetRef = useRef<{ x: number; y: number }>({ x: -500, y: -500 })
   const mouseCurrentRef = useRef<{ x: number; y: number }>({ x: -500, y: -500 })
 
@@ -556,137 +556,6 @@ function InteractiveBackground() {
     return () => cancelAnimationFrame(animId)
   }, [])
 
-  // Floating organic cotton petals & stardust particles canvas
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    let animationFrameId: number
-    let width = (canvas.width = window.innerWidth)
-    let height = (canvas.height = window.innerHeight)
-
-    const handleResize = () => {
-      if (!canvas) return
-      width = canvas.width = window.innerWidth
-      height = canvas.height = window.innerHeight
-    }
-    window.addEventListener('resize', handleResize)
-
-    // Palette of soft cotton petals and gold stardust
-    const colors = [
-      'rgba(244, 162, 175, 0.45)', // Soft Rose Coral
-      'rgba(255, 230, 200, 0.55)', // Airy Cotton Cream
-      'rgba(245, 205, 120, 0.40)', // Golden Pollen Stardust
-      'rgba(235, 180, 200, 0.40)', // Dusty Mauve
-      'rgba(255, 255, 255, 0.60)', // Pure Cotton Fluff
-    ]
-
-    interface Particle {
-      x: number
-      y: number
-      size: number
-      speedY: number
-      speedX: number
-      rotation: number
-      rotationSpeed: number
-      color: string
-      isPetal: boolean
-      swayOffset: number
-      swaySpeed: number
-      opacity: number
-    }
-
-    const particles: Particle[] = []
-    const PARTICLE_COUNT = 32
-
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      particles.push({
-        x: Math.random() * width,
-        y: Math.random() * height,
-        size: Math.random() * 8 + 4,
-        speedY: Math.random() * 0.7 + 0.3,
-        speedX: (Math.random() - 0.5) * 0.4,
-        rotation: Math.random() * Math.PI * 2,
-        rotationSpeed: (Math.random() - 0.5) * 0.02,
-        color: colors[Math.floor(Math.random() * colors.length)],
-        isPetal: Math.random() > 0.35,
-        swayOffset: Math.random() * Math.PI * 2,
-        swaySpeed: Math.random() * 0.02 + 0.01,
-        opacity: Math.random() * 0.5 + 0.3,
-      })
-    }
-
-    let time = 0
-
-    const render = () => {
-      ctx.clearRect(0, 0, width, height)
-      time += 0.015
-
-      if (breezeActive) {
-        particles.forEach((p) => {
-          // Sway movement
-          p.swayOffset += p.swaySpeed
-          const sway = Math.sin(p.swayOffset) * 0.6
-
-          p.y += p.speedY
-          p.x += p.speedX + sway
-          p.rotation += p.rotationSpeed
-
-          // Interactive breeze repulsion from mouse
-          const dx = p.x - mouseTargetRef.current.x
-          const dy = p.y - mouseTargetRef.current.y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < 140 && dist > 0) {
-            const force = (140 - dist) / 140
-            p.x += (dx / dist) * force * 3.5
-            p.y += (dy / dist) * force * 2.5
-          }
-
-          // Loop back to top if off screen
-          if (p.y > height + 20) {
-            p.y = -20
-            p.x = Math.random() * width
-          }
-          if (p.x < -20) p.x = width + 20
-          if (p.x > width + 20) p.x = -20
-
-          ctx.save()
-          ctx.translate(p.x, p.y)
-          ctx.rotate(p.rotation)
-          ctx.fillStyle = p.color
-          ctx.globalAlpha = p.opacity
-
-          if (p.isPetal) {
-            // Draw delicate cotton petal curve
-            ctx.beginPath()
-            ctx.moveTo(0, 0)
-            ctx.quadraticCurveTo(p.size, -p.size * 0.5, p.size * 1.4, 0)
-            ctx.quadraticCurveTo(p.size, p.size * 0.5, 0, 0)
-            ctx.fill()
-          } else {
-            // Draw twinkling stardust sparkle
-            ctx.beginPath()
-            ctx.arc(0, 0, p.size * 0.35, 0, Math.PI * 2)
-            ctx.fill()
-          }
-
-          ctx.restore()
-        })
-      }
-
-      animationFrameId = requestAnimationFrame(render)
-    }
-
-    animationFrameId = requestAnimationFrame(render)
-
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      cancelAnimationFrame(animationFrameId)
-    }
-  }, [breezeActive])
-
   return (
     <>
       {/* 1. Interactive Cursor Light Spotlight (Smooth warm illumination) */}
@@ -708,66 +577,6 @@ function InteractiveBackground() {
 
         {/* Mid-screen Breath Orb */}
         <div className="absolute top-[68%] -left-[10%] w-[480px] h-[480px] rounded-full bg-gradient-to-r from-emerald-100/10 via-rose-100/10 to-transparent blur-3xl animate-orb-2 transform-gpu" />
-      </div>
-
-      {/* 3. Interactive Floating Cotton Petals & Sparkle Canvas */}
-      <canvas
-        ref={canvasRef}
-        className="fixed inset-0 pointer-events-none z-20 w-full h-full select-none"
-      />
-
-      {/* 4. Floating Dragonfly Silhouette Brand Watermarks (Matching the Logo) */}
-      <div className="fixed inset-0 pointer-events-none z-[15] overflow-hidden select-none">
-        {/* Top Dragonfly Glide */}
-        <div className="absolute animate-dragonfly-1 opacity-25">
-          <svg width="42" height="42" viewBox="0 0 100 100" fill="none" className="text-rose-900 drop-shadow-sm">
-            {/* Dragonfly wings with flapping micro-animation */}
-            <g className="animate-wing">
-              <ellipse cx="28" cy="42" rx="26" ry="7" fill="currentColor" opacity="0.5" transform="rotate(-15 28 42)" />
-              <ellipse cx="72" cy="42" rx="26" ry="7" fill="currentColor" opacity="0.5" transform="rotate(15 72 42)" />
-              <ellipse cx="30" cy="52" rx="22" ry="5" fill="currentColor" opacity="0.4" transform="rotate(-8 30 52)" />
-              <ellipse cx="70" cy="52" rx="22" ry="5" fill="currentColor" opacity="0.4" transform="rotate(8 70 52)" />
-            </g>
-            {/* Body */}
-            <circle cx="50" cy="38" r="4" fill="currentColor" />
-            <line x1="50" y1="42" x2="50" y2="78" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-          </svg>
-        </div>
-
-        {/* Lower Dragonfly Glide */}
-        <div className="absolute animate-dragonfly-2 opacity-20">
-          <svg width="36" height="36" viewBox="0 0 100 100" fill="none" className="text-amber-900 drop-shadow-sm">
-            <g className="animate-wing">
-              <ellipse cx="28" cy="42" rx="26" ry="7" fill="currentColor" opacity="0.5" transform="rotate(-15 28 42)" />
-              <ellipse cx="72" cy="42" rx="26" ry="7" fill="currentColor" opacity="0.5" transform="rotate(15 72 42)" />
-              <ellipse cx="30" cy="52" rx="22" ry="5" fill="currentColor" opacity="0.4" transform="rotate(-8 30 52)" />
-              <ellipse cx="70" cy="52" rx="22" ry="5" fill="currentColor" opacity="0.4" transform="rotate(8 70 52)" />
-            </g>
-            <circle cx="50" cy="38" r="4" fill="currentColor" />
-            <line x1="50" y1="42" x2="50" y2="78" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-          </svg>
-        </div>
-      </div>
-
-      {/* 5. Client Interactive Breeze Control Pill & Orvexa Platform Switcher (Bottom Left) */}
-      <div className="fixed bottom-6 left-6 z-40 flex items-center gap-2">
-        <button
-          onClick={() => setBreezeActive(!breezeActive)}
-          className="flex items-center gap-2 bg-white/85 backdrop-blur-md border border-black/15 shadow-lg hover:border-black text-black px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all hover:scale-105 active:scale-95 cursor-pointer select-none"
-          title="Toggle interactive background breeze"
-        >
-          <span className={`w-2 h-2 rounded-full ${breezeActive ? 'bg-emerald-500 animate-pulse' : 'bg-stone-300'}`} />
-          <span>{breezeActive ? '✨ Floating Breeze: Active' : '✨ Floating Breeze: Paused'}</span>
-        </button>
-
-        <button
-          onClick={() => switchLayer('admin')}
-          className="flex items-center gap-1.5 bg-black hover:bg-stone-800 text-white px-3.5 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-xl border border-white/20 backdrop-blur-md"
-          title="Go to Orvexa Multi-Tenant Admin Console"
-        >
-          <span className="text-amber-400">👑</span>
-          <span>ORVEXA ADMIN</span>
-        </button>
       </div>
     </>
   )
@@ -847,28 +656,23 @@ function AnnouncementBar({
   }, [tenant, customMessages, brandName])
 
   return (
-    <div className="bg-[#0055FF] text-white py-2.5 relative overflow-hidden flex items-center font-sans text-[11px] font-bold tracking-[0.2em] uppercase select-none z-50 shadow-md">
+    <div className="relative overflow-hidden flex items-center font-sans text-[11px] font-bold tracking-[0.2em] uppercase select-none z-50 shadow-lg" style={{ background: 'linear-gradient(90deg, #0a0a0a 0%, #1a0a2e 30%, #0a0a1a 60%, #1a0f00 90%, #0a0a0a 100%)', color: '#fff', paddingTop: '10px', paddingBottom: '10px' }}>
+      {/* Subtle shimmer overlay */}
+      <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%)' }} />
+      
       <div className="animate-marquee flex items-center whitespace-nowrap gap-12">
         {tickerItems.map((item, idx) => (
           <div key={idx} className="flex items-center gap-12">
-            <span>{item}</span>
-            <span className="text-white/40">✦</span>
+            <span className="text-white/90">{item}</span>
+            <span className="text-amber-400/60 text-[9px]">✦</span>
           </div>
         ))}
       </div>
 
       <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 z-20">
         <button
-          onClick={() => switchLayer('admin')}
-          className="hidden sm:inline-flex items-center gap-1 bg-black/40 hover:bg-black/70 text-white border border-white/30 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider cursor-pointer transition-all shadow-sm"
-          title="Go to Orvexa Multi-Tenant Admin"
-        >
-          <span>👑</span>
-          <span>ORVEXA ADMIN</span>
-        </button>
-        <button
           onClick={onDismiss}
-          className="bg-[#0055FF] pl-2 pr-1 text-white/80 hover:text-white text-sm font-light leading-none cursor-pointer"
+          className="pl-2 pr-1 text-white/60 hover:text-white text-sm font-light leading-none cursor-pointer transition-colors"
           aria-label="Dismiss announcement"
         >
           ✕
@@ -1045,14 +849,6 @@ function Navigation({
               className="text-black/80 hover:text-black transition-colors cursor-pointer"
             >
               CONTACT
-            </button>
-            <button
-              onClick={() => switchLayer('admin')}
-              className="flex items-center gap-1.5 text-black hover:text-white bg-stone-100 hover:bg-black px-2.5 py-1 rounded-xs border border-black/20 hover:border-black transition-all cursor-pointer font-bold tracking-wider text-[11px]"
-              title="Go to Orvexa Multi-Tenant Admin Console"
-            >
-              <span className="text-amber-500">👑</span>
-              <span>ORVEXA ADMIN</span>
             </button>
           </nav>
         </div>
@@ -1252,13 +1048,6 @@ function MobileMenuDrawer({
             >
               ♥ MY WISHLIST ({wishlistCount})
             </button>
-
-            <button
-              onClick={() => { onClose(); switchLayer('admin') }}
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-700 to-indigo-700 text-white py-2.5 text-xs font-bold tracking-widest uppercase hover:opacity-90 cursor-pointer shadow-md"
-            >
-              👑 ORVEXA MULTI-TENANT ADMIN
-            </button>
           </div>
         </div>
       </div>
@@ -1375,43 +1164,91 @@ function HeroSection({
   const ctaText = tenant?.theme?.heroCtaText || 'EXPLORE COLLECTIONS →'
   const announcementSub = tenant?.theme?.announcementMessages?.[0] || 'HANDCRAFTED ARTISANAL ETHNIC COLLECTION'
 
+  const handleExploreClick = (e: React.MouseEvent<HTMLButtonElement | HTMLDivElement>) => {
+    // Dynamic luxury click ripple effect
+    const btn = e.currentTarget
+    const rect = btn.getBoundingClientRect()
+    const ripple = document.createElement('span')
+    const size = Math.max(rect.width, rect.height) * 2.2
+    ripple.style.width = ripple.style.height = `${size}px`
+    ripple.style.left = `${e.clientX - rect.left - size / 2}px`
+    ripple.style.top = `${e.clientY - rect.top - size / 2}px`
+    ripple.className = 'explore-ripple-effect'
+    btn.appendChild(ripple)
+    setTimeout(() => {
+      ripple.remove()
+    }, 850)
+
+    // Smooth cinematic glide to the collections section
+    const target = document.getElementById('collections-section')
+    if (target) {
+      const topOffset = target.getBoundingClientRect().top + window.scrollY - 70
+      window.scrollTo({
+        top: topOffset,
+        behavior: 'smooth',
+      })
+      target.classList.add('animate-section-highlight')
+      setTimeout(() => target.classList.remove('animate-section-highlight'), 1800)
+    } else {
+      onShopClick()
+    }
+  }
+
   return (
-    <section className="relative h-[88vh] min-h-[640px] bg-stone-950 flex items-center justify-center overflow-hidden">
+    <section className="relative h-[92vh] min-h-[640px] bg-stone-950 flex items-center justify-center overflow-hidden">
       <img
         src={heroImage}
         alt={brandTitle}
-        className="absolute inset-0 w-full h-full object-cover object-center opacity-70 scale-105 transition-all duration-700"
+        className="absolute inset-0 w-full h-full object-cover object-center opacity-65 scale-[1.04] transition-all duration-1000"
       />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/20" />
+      {/* Multi-layer gradient for depth */}
+      <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.96) 0%, rgba(0,0,0,0.55) 40%, rgba(0,0,0,0.15) 70%, rgba(0,0,0,0.3) 100%)' }} />
+      <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.3) 0%, transparent 40%, transparent 60%, rgba(0,0,0,0.2) 100%)' }} />
 
-      <div className="relative z-10 text-center text-white px-6 max-w-4xl mx-auto">
-        <span className="bg-white/20 backdrop-blur-md text-white text-[10px] font-bold tracking-[0.25em] uppercase px-4 py-1.5 mb-6 inline-block border border-white/30">
-          {announcementSub}
-        </span>
+      <div className="relative z-10 text-center text-white px-6 max-w-5xl mx-auto">
+        <div className="animate-hero-reveal">
+          <span className="inline-flex items-center gap-2 text-[10px] font-bold tracking-[0.3em] uppercase px-5 py-2 mb-8" style={{ background: 'rgba(255,255,255,0.12)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '2px' }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+            {announcementSub}
+          </span>
+        </div>
         <h1
-          className="text-4xl md:text-6xl lg:text-7xl font-normal tracking-tight uppercase leading-[0.95] mb-6 text-white"
-          style={{ fontFamily: 'var(--font-display)' }}
+          className="animate-hero-reveal-delay-1 text-5xl md:text-7xl lg:text-8xl font-normal tracking-tight uppercase leading-[0.9] mb-6 text-white"
+          style={{ fontFamily: 'var(--font-display)', textShadow: '0 4px 40px rgba(0,0,0,0.6)' }}
         >
           {headline}
         </h1>
-        <p className="text-sm md:text-lg tracking-widest text-white/80 font-light max-w-2xl mx-auto mb-10 leading-relaxed">
+        <p className="animate-hero-reveal-delay-2 text-sm md:text-base tracking-[0.12em] text-white/75 font-light max-w-2xl mx-auto mb-12 leading-relaxed">
           {subhead}
         </p>
-        <div className="flex items-center justify-center gap-6 flex-wrap">
+        <div className="animate-hero-reveal-delay-3 flex items-center justify-center gap-5 flex-wrap">
           <button
-            onClick={onShopClick}
-            className="bg-white text-black font-bold text-xs tracking-[0.2em] uppercase px-9 py-4 hover:bg-black hover:text-white border border-white transition-all duration-300 shadow-2xl active:scale-95 cursor-pointer"
+            onClick={handleExploreClick}
+            className="group relative overflow-hidden bg-white text-black font-bold text-[11px] tracking-[0.25em] uppercase px-10 py-4 border border-white transition-all duration-300 shadow-2xl active:scale-95 cursor-pointer transform-gpu hover:shadow-[0_0_35px_rgba(255,255,255,0.4)]"
           >
-            {ctaText}
+            <span className="relative z-10 group-hover:text-white transition-colors duration-300 flex items-center justify-center gap-2">
+              <span>{ctaText.replace(' →', '').replace('->', '')}</span>
+              <span className="animate-arrow-glide text-sm">→</span>
+            </span>
+            <div className="absolute inset-0 bg-black translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
           </button>
           {tenant?.theme?.secondaryCtaText && (
             <button
               onClick={onShopClick}
-              className="bg-white/10 backdrop-blur-xs text-white hover:bg-white hover:text-black font-bold text-xs tracking-[0.2em] uppercase px-8 py-4 border border-white/60 transition-all duration-300 active:scale-95 cursor-pointer"
+              className="text-white/90 hover:text-white font-bold text-[11px] tracking-[0.25em] uppercase px-6 py-4 border border-white/40 hover:border-white transition-all duration-300 active:scale-95 cursor-pointer" style={{ background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(8px)' }}
             >
               {tenant.theme.secondaryCtaText}
             </button>
           )}
+        </div>
+
+        {/* Scroll indicator */}
+        <div
+          onClick={handleExploreClick}
+          className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 animate-hero-reveal-delay-3 cursor-pointer hover:opacity-100 opacity-60 transition-opacity"
+        >
+          <span className="text-white/70 text-[9px] font-bold tracking-[0.3em] uppercase">Scroll to Explore</span>
+          <div className="w-0.5 h-8 bg-gradient-to-b from-white/70 to-transparent animate-bounce" />
         </div>
       </div>
     </section>
@@ -1422,30 +1259,34 @@ function HeroSection({
 function TrustBar({ tenant }: { tenant?: TenantConfig | null }) {
   const brandShort = tenant?.brandName?.split(' ')?.[0] || 'LUNAR'
   const items = [
-    { icon: '🌐', text: 'FREE SHIPPING IN INDIA > ₹999' },
-    { icon: '❇️', text: '100% AUTHENTIC ARTISANAL CRAFT' },
-    { icon: '🛡️', text: 'QUALITY CERTIFIED & TESTED' },
-    { icon: '❇️', text: `10,000+ HAPPY ${brandShort.toUpperCase()} CLIENTS` },
-    { icon: '💧', text: 'HANDLOOM & HERITAGE WEAVES' },
-    { icon: '⚡', text: '100% SATISFACTION GUARANTEE' },
-    { icon: '🌐', text: 'FREE SHIPPING IN INDIA > ₹999' },
-    { icon: '❇️', text: '100% AUTHENTIC ARTISANAL CRAFT' },
-    { icon: '🛡️', text: 'QUALITY CERTIFIED & TESTED' },
-    { icon: '❇️', text: `10,000+ HAPPY ${brandShort.toUpperCase()} CLIENTS` },
-    { icon: '💧', text: 'HANDLOOM & HERITAGE WEAVES' },
-    { icon: '⚡', text: '100% SATISFACTION GUARANTEE' },
+    { icon: '✈️', text: 'FREE SHIPPING IN INDIA > ₹999', accent: false },
+    { icon: '🌿', text: '100% AUTHENTIC ARTISANAL CRAFT', accent: false },
+    { icon: '🛡️', text: 'QUALITY CERTIFIED & TESTED', accent: false },
+    { icon: '⭐', text: `10,000+ HAPPY ${brandShort.toUpperCase()} CLIENTS`, accent: true },
+    { icon: '🧵', text: 'HANDLOOM & HERITAGE WEAVES', accent: false },
+    { icon: '✨', text: '100% SATISFACTION GUARANTEE', accent: false },
+    { icon: '📦', text: '2–5 DAY EXPRESS DELIVERY', accent: false },
+    { icon: '🔄', text: '30-DAY EASY RETURNS', accent: false },
+    { icon: '✈️', text: 'FREE SHIPPING IN INDIA > ₹999', accent: false },
+    { icon: '🌿', text: '100% AUTHENTIC ARTISANAL CRAFT', accent: false },
+    { icon: '🛡️', text: 'QUALITY CERTIFIED & TESTED', accent: false },
+    { icon: '⭐', text: `10,000+ HAPPY ${brandShort.toUpperCase()} CLIENTS`, accent: true },
+    { icon: '🧵', text: 'HANDLOOM & HERITAGE WEAVES', accent: false },
+    { icon: '✨', text: '100% SATISFACTION GUARANTEE', accent: false },
+    { icon: '📦', text: '2–5 DAY EXPRESS DELIVERY', accent: false },
+    { icon: '🔄', text: '30-DAY EASY RETURNS', accent: false },
   ]
 
   return (
-    <div className="bg-white/80 backdrop-blur-xs border-y border-black/10 py-3.5 overflow-hidden relative select-none z-10">
-      <div className="animate-marquee flex items-center whitespace-nowrap gap-16 text-xs font-bold tracking-[0.18em] uppercase text-black">
+    <div className="border-y border-black/8 py-3 overflow-hidden relative select-none z-10" style={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(8px)' }}>
+      <div className="animate-marquee flex items-center whitespace-nowrap gap-14 text-[10px] font-bold tracking-[0.2em] uppercase text-black">
         {items.map((item, idx) => (
-          <div key={idx} className="flex items-center gap-16">
+          <div key={idx} className="flex items-center gap-14">
             <div className="flex items-center gap-2">
-              <span className="text-sm">{item.icon}</span>
-              <span>{item.text}</span>
+              <span className="text-xs">{item.icon}</span>
+              <span className={item.accent ? 'text-amber-700' : 'text-black/75'}>{item.text}</span>
             </div>
-            <span className="text-black/20 text-[10px]">✦</span>
+            <span className="text-black/15 text-[8px]">◆</span>
           </div>
         ))}
       </div>
@@ -1476,22 +1317,25 @@ function ProductCard({
     >
       <div
         onClick={() => onSelectProduct(product.id)}
-        className="relative aspect-[4/5] bg-stone-100 overflow-hidden mb-3 shadow-md"
+        className="relative aspect-[4/5] bg-stone-100 overflow-hidden mb-3"
+        style={{ boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}
       >
         <img
           src={hovered ? secondaryImage : product.imgMain}
           alt={product.name}
-          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+          className="w-full h-full object-cover transition-all duration-700 group-hover:scale-[1.06]"
         />
+        {/* Subtle gradient at bottom */}
+        <div className="absolute inset-x-0 bottom-0 h-24 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.2), transparent)' }} />
 
         {/* Badges */}
-        <div className="absolute top-3 left-3 flex flex-col gap-1 z-10">
+        <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-10">
           {product.badge && (
-            <span className="bg-black text-white text-[9px] font-bold tracking-widest uppercase px-2 py-1 shadow-sm">
+            <span className="text-[9px] font-bold tracking-widest uppercase px-2.5 py-1 shadow-sm text-white" style={{ background: '#000' }}>
               {product.badge}
             </span>
           )}
-          <span className="bg-white/95 backdrop-blur-sm text-black text-[9px] font-mono font-bold tracking-wider px-2 py-0.5 border border-black/10">
+          <span className="text-[9px] font-mono font-bold tracking-wider px-2 py-0.5 text-black" style={{ background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(8px)', border: '1px solid rgba(0,0,0,0.08)' }}>
             {product.sculptLevel}
           </span>
         </div>
@@ -1502,53 +1346,62 @@ function ProductCard({
             e.stopPropagation()
             onToggleWishlist(product.id)
           }}
-          className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-white/80 backdrop-blur-md flex items-center justify-center text-xs transition-transform active:scale-75 shadow-sm cursor-pointer"
+          className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all active:scale-75 cursor-pointer" style={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(8px)', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
           title="Add to Wishlist"
         >
-          <span className={isWishlisted ? 'text-red-600 scale-110' : 'text-black/50 hover:text-black'}>
+          <span className={`transition-all ${isWishlisted ? 'text-rose-600 scale-110' : 'text-black/40 hover:text-black'}`}>
             {isWishlisted ? '♥' : '♡'}
           </span>
         </button>
 
+        {/* Rating badge overlay */}
+        <div className="absolute bottom-3 left-3 z-10 flex items-center gap-1 px-2 py-0.5" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', borderRadius: '2px' }}>
+          <span className="text-amber-400 text-[10px]">★</span>
+          <span className="text-white text-[10px] font-bold">{product.rating}</span>
+          <span className="text-white/50 text-[9px]">({product.reviewsCount})</span>
+        </div>
+
         {/* Hover Quick View overlay button */}
-        <div className="absolute inset-x-3 bottom-3 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-2 group-hover:translate-y-0">
+        <div className="absolute inset-x-3 bottom-3 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-2 group-hover:translate-y-0 z-20">
           <button
             onClick={(e) => {
               e.stopPropagation()
               onSelectProduct(product.id)
             }}
-            className="w-full bg-white/95 text-black font-bold text-[10px] tracking-widest uppercase py-2.5 shadow-md border border-black/10 hover:bg-black hover:text-white transition-colors cursor-pointer"
+            className="w-full font-bold text-[10px] tracking-widest uppercase py-3 cursor-pointer transition-all" style={{ background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(4px)', color: '#000', border: '1px solid rgba(0,0,0,0.08)' }}
           >
-            QUICK VIEW & SIZE →
+            QUICK VIEW & CUSTOMIZE →
           </button>
         </div>
       </div>
 
       <div onClick={() => onSelectProduct(product.id)}>
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <p className="text-xs font-bold tracking-wider uppercase text-black/50">{product.fabricTech}</p>
-          <div className="flex items-center gap-1 text-[11px] text-amber-600 font-semibold">
-            <span>★ {product.rating}</span>
-            <span className="text-black/40">({product.reviewsCount})</span>
+        <div className="flex items-center justify-between gap-2 mb-1.5">
+          <p className="text-[10px] font-bold tracking-wider uppercase text-black/45">{product.fabricTech}</p>
+          <div className="flex items-center gap-0.5">
+            {product.colors.slice(0, 3).map((c) => (
+              <span
+                key={c.name}
+                className="w-3 h-3 rounded-full border border-black/15 shadow-sm"
+                style={{ backgroundColor: c.hex }}
+                title={c.name}
+              />
+            ))}
+            {product.colors.length > 3 && <span className="text-[9px] text-black/40 font-bold ml-0.5">+{product.colors.length - 3}</span>}
           </div>
         </div>
 
-        <h3 className="text-sm font-semibold tracking-wide text-black group-hover:underline underline-offset-4 mb-1 truncate">
+        <h3 className="text-sm font-semibold tracking-wide text-black group-hover:text-black/70 transition-colors mb-1 truncate">
           {product.name}
         </h3>
 
         <div className="flex items-center justify-between">
           <p className="text-sm font-bold text-black">{product.priceFormatted}</p>
-          <div className="flex items-center gap-1">
-            {product.colors.map((c) => (
-              <span
-                key={c.name}
-                className="w-2.5 h-2.5 rounded-full border border-black/20"
-                style={{ backgroundColor: c.hex }}
-                title={c.name}
-              />
-            ))}
-          </div>
+          {product.badge === 'Bestseller' || product.badge === 'Trending' ? (
+            <span className="text-[9px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 border border-emerald-200">
+              🔥 {product.badge}
+            </span>
+          ) : null}
         </div>
       </div>
     </div>
@@ -1571,7 +1424,7 @@ function BestsellersSection({
 }) {
   const brandName = tenant?.brandName || 'The Lunar Clothing'
   return (
-    <section className="py-20 bg-white/70 backdrop-blur-xs relative z-10">
+    <section id="collections-section" className="py-20 bg-white/70 backdrop-blur-xs relative z-10 scroll-mt-14 transition-all duration-700">
       <div className="max-w-screen-2xl mx-auto px-6 mb-8 flex items-end justify-between">
         <div>
           <p className="text-xs font-bold tracking-[0.25em] uppercase text-black/40 mb-2">HANDCRAFTED ARTISANAL COLLECTION</p>
@@ -3466,37 +3319,6 @@ function AuthModal({
             </div>
           )}
         </div>
-
-        {/* Platform & Merchant Portal Direct Switcher */}
-        <div className="bg-stone-100 border-t border-black/10 p-4">
-          <p className="text-[10px] font-mono tracking-widest text-black/60 uppercase text-center mb-2.5 font-bold">
-            PLATFORM MANAGEMENT & STORE ADMIN
-          </p>
-          <div className="grid grid-cols-2 gap-2.5">
-            <button
-              onClick={() => {
-                onClose()
-                switchLayer('admin')
-              }}
-              className="bg-black hover:bg-stone-800 text-white text-[11px] font-bold py-2.5 px-3 rounded-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all uppercase tracking-wider"
-              title="Open Orvexa Multi-Tenant Super Admin Console"
-            >
-              <span className="text-amber-400">👑</span>
-              <span>Orvexa Admin</span>
-            </button>
-            <button
-              onClick={() => {
-                onClose()
-                switchLayer('dashboard')
-              }}
-              className="bg-white hover:bg-stone-50 border border-black/20 text-black text-[11px] font-bold py-2.5 px-3 rounded-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-all uppercase tracking-wider"
-              title="Open Seller / Merchant Dashboard"
-            >
-              <span>🏬</span>
-              <span>Seller Portal</span>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   )
@@ -3578,23 +3400,6 @@ function AccountDrawer({
                 ✕
               </button>
             </div>
-          </div>
-
-          {/* Quick Platform Admin Switcher Banner */}
-          <div className="bg-gradient-to-r from-violet-950 via-indigo-950 to-stone-950 text-white px-6 py-2.5 flex items-center justify-between text-xs border-b border-white/10">
-            <span className="flex items-center gap-2 text-violet-200">
-              <span>👑</span>
-              <span className="font-semibold">Looking for Orvexa Multi-Tenant Platform Super Admin?</span>
-            </span>
-            <button
-              onClick={() => {
-                onClose()
-                switchLayer('admin')
-              }}
-              className="bg-violet-600 hover:bg-violet-500 text-white font-bold text-[10px] uppercase tracking-wider px-3 py-1.5 rounded-xs cursor-pointer shadow-md transition-all flex items-center gap-1"
-            >
-              <span>Open Admin Console →</span>
-            </button>
           </div>
 
           {/* Navigation Tabs */}
@@ -4398,88 +4203,142 @@ function CatalogPage({
 }
 
 // 18. FOOTER COMPONENT
-function Footer({ tenant }: { tenant?: TenantConfig }) {
-  const switchLayer = useSwitchLayer()
+function Footer({
+  tenant,
+  onOpenSellerLogin,
+  onOpenAdminLogin,
+}: {
+  tenant?: TenantConfig
+  onOpenSellerLogin?: () => void
+  onOpenAdminLogin?: () => void
+}) {
   const brandName = tenant?.name || 'THE LUNAR CLOTHING'
   const brandTagline = tenant?.tagline || 'Handcrafted 100% soft cotton maxis, artisanal block prints, and festive dresses with functional side pockets.'
   const shippingText = tenant?.contact?.shippingThresholdFormatted ? `Free Shipping over ${tenant.contact.shippingThresholdFormatted}` : 'Free Shipping over ₹999'
 
   return (
-    <footer className="bg-black text-white pt-16 pb-12 border-t border-white/10">
-      <div className="max-w-screen-2xl mx-auto px-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16">
-          <div>
-            <h3 className="text-lg font-serif tracking-wider uppercase mb-4">{brandName}</h3>
-            <p className="text-xs text-white/60 leading-relaxed mb-6">
+    <footer className="text-white border-t border-white/10" style={{ background: 'linear-gradient(180deg, #0a0a0f 0%, #050508 100%)' }}>
+      {/* Trust Strip */}
+      <div className="border-b border-white/8 py-6">
+        <div className="max-w-screen-2xl mx-auto px-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            {[
+              { icon: '✈️', title: 'Free Shipping', sub: 'On orders above ₹999' },
+              { icon: '🔄', title: '30-Day Returns', sub: 'Hassle-free exchanges' },
+              { icon: '🛡️', title: 'Quality Assured', sub: '100% authentic fabrics' },
+              { icon: '💬', title: 'WhatsApp Support', sub: 'Mon–Sat, 10AM–7PM IST' },
+            ].map((item) => (
+              <div key={item.title} className="flex items-start gap-3">
+                <span className="text-2xl mt-0.5">{item.icon}</span>
+                <div>
+                  <p className="text-xs font-bold text-white/90 uppercase tracking-wider">{item.title}</p>
+                  <p className="text-[11px] text-white/45 mt-0.5">{item.sub}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-screen-2xl mx-auto px-6 pt-14 pb-8">
+        {/* Main Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-12 mb-14">
+          {/* Brand Column */}
+          <div className="md:col-span-4">
+            <h3 className="font-serif text-2xl tracking-wider uppercase mb-3" style={{ fontFamily: 'var(--font-display)' }}>{brandName}</h3>
+            <p className="text-xs text-white/50 leading-relaxed mb-6 max-w-xs">
               {brandTagline}
             </p>
-            <div className="flex gap-4 text-white/60">
-              <span className="hover:text-white cursor-pointer">Instagram</span>
-              <span className="hover:text-white cursor-pointer">WhatsApp</span>
-              <span className="hover:text-white cursor-pointer">Pinterest</span>
+            {/* Social Links */}
+            <div className="flex gap-3">
+              {[
+                { label: 'IG', name: 'Instagram' },
+                { label: 'WA', name: 'WhatsApp' },
+                { label: 'PT', name: 'Pinterest' },
+                { label: 'FB', name: 'Facebook' },
+              ].map((s) => (
+                <a key={s.name} href="#" title={s.name} className="w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-bold text-white/60 hover:text-white transition-all hover:scale-105" style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)' }}>
+                  {s.label}
+                </a>
+              ))}
             </div>
           </div>
 
-          <div>
-            <h4 className="text-xs font-bold tracking-widest uppercase text-white/40 mb-4">JOIN THE ATELIER</h4>
-            <p className="text-xs text-white/60 mb-4">Subscribe for private trunk show access and new seasonal drops.</p>
-            <form onSubmit={(e) => { e.preventDefault(); alert('Subscribed!') }} className="flex border-b border-white/20 pb-2">
-              <input
-                type="email"
-                placeholder="YOUR EMAIL"
-                className="bg-transparent text-xs w-full outline-none text-white placeholder-white/40"
-                required
-              />
-              <button type="submit" className="text-xs font-bold uppercase tracking-widest text-white/80 hover:text-white cursor-pointer">
-                JOIN →
-              </button>
-            </form>
-          </div>
+          {/* Links Grid */}
+          <div className="md:col-span-8 grid grid-cols-1 sm:grid-cols-3 gap-8">
+            <div>
+              <h4 className="text-[10px] font-bold tracking-[0.25em] uppercase text-white/30 mb-5">CUSTOMER CARE</h4>
+              <ul className="space-y-3 text-xs text-white/60">
+                <li><a href="#" className="hover:text-white transition-colors">{shippingText}</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Shipping & Delivery</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Fabric Care Guide</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Size Guide & Custom Lengths</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Returns & Exchanges</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Contact & Support</a></li>
+              </ul>
+            </div>
 
-          <div>
-            <h4 className="text-xs font-bold tracking-widest uppercase text-white/40 mb-4">CUSTOMER CARE</h4>
-            <ul className="space-y-2.5 text-xs text-white/70">
-              <li><a href="#" className="hover:text-white">{shippingText}</a></li>
-              <li><a href="#" className="hover:text-white">Shipping & Delivery in India</a></li>
-              <li><a href="#" className="hover:text-white">Fabric Care & Washing Guide</a></li>
-              <li><a href="#" className="hover:text-white">Size Guide & Custom Lengths</a></li>
-              <li><a href="#" className="hover:text-white">Contact Us</a></li>
-            </ul>
-          </div>
+            <div>
+              <h4 className="text-[10px] font-bold tracking-[0.25em] uppercase text-white/30 mb-5">OUR CRAFT</h4>
+              <ul className="space-y-3 text-xs text-white/60">
+                <li><a href="#" className="hover:text-white transition-colors">About Our Studio</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Artisan Heritage</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Kalamkari Prints</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">Handloom Weaves</a></li>
+                <li><a href="#" className="hover:text-white transition-colors">New Arrivals</a></li>
+              </ul>
+            </div>
 
-          <div>
-            <h4 className="text-xs font-bold tracking-widest uppercase text-white/40 mb-4">PARTNER & PORTAL</h4>
-            <ul className="space-y-2.5 text-xs text-white/70">
-              <li>
-                <button
-                  onClick={() => switchLayer('admin')}
-                  className="hover:text-white flex items-center gap-1.5 text-violet-300 font-semibold cursor-pointer"
-                >
-                  <span>👑</span>
-                  <span>Orvexa Multi-Tenant Admin</span>
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => switchLayer('dashboard')}
-                  className="hover:text-white flex items-center gap-1.5 text-amber-300 font-semibold cursor-pointer"
-                >
-                  <span>🏬</span>
-                  <span>Seller Portal Dashboard</span>
-                </button>
-              </li>
-              <li><a href="#" className="hover:text-white">Merchant Application</a></li>
-              <li><a href="#" className="hover:text-white">Brand Partnerships</a></li>
-            </ul>
+            <div>
+              <h4 className="text-[10px] font-bold tracking-[0.25em] uppercase text-white/30 mb-5">PORTAL ACCESS</h4>
+              <ul className="space-y-3 text-xs">
+                <li>
+                  <button onClick={onOpenSellerLogin} className="flex items-center gap-2 text-stone-300 hover:text-white font-medium transition-colors cursor-pointer">
+                    <span>🏬</span><span>Seller Portal Login</span>
+                  </button>
+                </li>
+                <li>
+                  <button onClick={onOpenAdminLogin} className="flex items-center gap-2 text-stone-400 hover:text-white font-medium transition-colors cursor-pointer">
+                    <span>🛡️</span><span>Super Admin Login</span>
+                  </button>
+                </li>
+                <li><a href="#" className="text-white/60 hover:text-white transition-colors">Apply as Merchant</a></li>
+                <li><a href="#" className="text-white/60 hover:text-white transition-colors">Brand Partnerships</a></li>
+              </ul>
+            </div>
           </div>
         </div>
 
-        <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-white/40">
-          <p>© {new Date().getFullYear()} {brandName}. All rights reserved.</p>
-          <div className="flex gap-6">
-            <span>PRIVACY POLICY</span>
-            <span>TERMS OF SERVICE</span>
+        {/* Newsletter Strip */}
+        <div className="border border-white/10 p-6 mb-10 flex flex-col md:flex-row items-center justify-between gap-6" style={{ background: 'rgba(255,255,255,0.04)' }}>
+          <div>
+            <p className="text-sm font-bold text-white uppercase tracking-wider">Join The Atelier</p>
+            <p className="text-xs text-white/50 mt-1">Exclusive trunk show access, early drops & artisan stories.</p>
+          </div>
+          <form onSubmit={(e) => { e.preventDefault() }} className="flex gap-0 border border-white/20 flex-shrink-0">
+            <input
+              type="email"
+              placeholder="YOUR EMAIL ADDRESS"
+              className="bg-transparent text-xs w-56 px-4 py-3 outline-none text-white placeholder-white/30 font-mono tracking-wider"
+              required
+            />
+            <button type="submit" className="text-[11px] font-bold uppercase tracking-widest text-black px-5 py-3 cursor-pointer transition-all hover:opacity-90" style={{ background: 'white' }}>
+              JOIN →
+            </button>
+          </form>
+        </div>
+
+        {/* Bottom Bar */}
+        <div className="border-t border-white/8 pt-6 flex flex-col md:flex-row items-center justify-between gap-4 text-[10px] text-white/30">
+          <p className="font-mono">© {new Date().getFullYear()} {brandName}. All rights reserved.</p>
+          <div className="flex gap-8 uppercase tracking-widest">
+            <a href="#" className="hover:text-white/60 transition-colors">Privacy Policy</a>
+            <a href="#" className="hover:text-white/60 transition-colors">Terms of Service</a>
             <span>INDIA ({tenant?.currencySymbol || '₹'} {tenant?.currency || 'INR'})</span>
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Powered by Orvexa
+            </span>
           </div>
         </div>
       </div>
@@ -4515,6 +4374,8 @@ export default function App() {
   const [user, setUser] = useState<UserAccount | null>(null)
   const [orders, setOrders] = useState<TrackedOrder[]>(tenantOrders)
   const [isAuthOpen, setIsAuthOpen] = useState(false)
+  const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false)
+  const [isSellerLoginOpen, setIsSellerLoginOpen] = useState(false)
   const [isAccountOpen, setIsAccountOpen] = useState(false)
   const [isAboutOpen, setIsAboutOpen] = useState(false)
   const [isContactOpen, setIsContactOpen] = useState(false)
@@ -4770,7 +4631,11 @@ export default function App() {
         )}
       </main>
 
-      <Footer tenant={activeTenant} />
+      <Footer
+        tenant={activeTenant}
+        onOpenSellerLogin={() => setIsSellerLoginOpen(true)}
+        onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
+      />
 
       {/* Mobile Drawer Navigation */}
       <MobileMenuDrawer
@@ -4876,11 +4741,52 @@ export default function App() {
 
       {/* Floating Status Notification Toast */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-black text-white px-5 py-3 rounded-xs shadow-2xl border border-white/20 text-xs font-semibold tracking-wider uppercase flex items-center gap-3 animate-slide-down">
-          <span className="text-emerald-400 font-bold">✓</span>
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] text-white px-6 py-3.5 text-xs font-bold tracking-wider uppercase flex items-center gap-3 animate-slide-up"
+          style={{ background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '2px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
+        >
+          <span className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[10px] font-black flex-shrink-0">✓</span>
           <span>{toastMessage}</span>
         </div>
       )}
+
+      {/* WhatsApp Floating Chat Widget */}
+      <a
+        href={`https://wa.me/${(activeTenant?.contact?.phone || '+919876543210').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${activeTenant?.name || 'The Lunar Clothing'}, I have an inquiry.`)}`}
+        target="_blank"
+        rel="noreferrer"
+        className="fixed bottom-24 right-5 z-40 w-14 h-14 rounded-full flex items-center justify-center text-white text-2xl shadow-2xl transition-all hover:scale-110 active:scale-95 cursor-pointer animate-wa-bounce"
+        style={{ background: 'linear-gradient(135deg, #25d366, #128c7e)', boxShadow: '0 4px 20px rgba(37,211,102,0.5)' }}
+        title={`Chat with ${activeTenant?.name || 'The Lunar Clothing'} on WhatsApp`}
+        aria-label="Chat on WhatsApp"
+      >
+        <svg viewBox="0 0 32 32" className="w-7 h-7 fill-white">
+          <path d="M16 0C7.163 0 0 7.163 0 16c0 2.821.737 5.47 2.025 7.771L0 32l8.431-2.013A15.93 15.93 0 0016 32c8.837 0 16-7.163 16-16S24.837 0 16 0zm0 29.333a13.3 13.3 0 01-6.807-1.868l-.488-.29-5.007 1.196 1.217-4.873-.318-.5A13.262 13.262 0 012.667 16C2.667 8.636 8.636 2.667 16 2.667S29.333 8.636 29.333 16 23.364 29.333 16 29.333zm7.275-9.982c-.399-.2-2.36-1.163-2.726-1.296-.366-.133-.633-.2-.9.2-.266.4-1.033 1.296-1.266 1.563-.233.266-.466.3-.866.1-.4-.2-1.688-.622-3.214-1.984-1.188-1.06-1.99-2.37-2.222-2.77-.233-.4-.025-.616.175-.816.18-.18.4-.466.6-.7.2-.233.266-.4.4-.666.133-.267.066-.5-.033-.7-.1-.2-.9-2.166-1.233-2.966-.325-.78-.656-.673-.9-.686l-.766-.013c-.267 0-.7.1-1.067.5-.366.4-1.4 1.366-1.4 3.332 0 1.966 1.433 3.865 1.633 4.132.2.267 2.82 4.3 6.832 6.032.955.412 1.7.66 2.282.845.959.305 1.832.262 2.522.159.77-.114 2.36-.964 2.694-1.896.332-.933.332-1.733.233-1.9-.1-.166-.366-.266-.765-.466z"/>
+        </svg>
+      </a>
+
+      {/* Super Admin Login Modal (Accessible with Super Admin Credentials) */}
+      <AdminLoginModal
+        isOpen={isAdminLoginOpen}
+        onClose={() => setIsAdminLoginOpen(false)}
+      />
+
+      {/* Seller Portal Login Modal (Accessible with Seller Credentials) */}
+      <SellerLoginModal
+        isOpen={isSellerLoginOpen}
+        onClose={() => setIsSellerLoginOpen(false)}
+      />
+
+      {/* Scroll to Top Button */}
+      <button
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        className="fixed bottom-7 right-5 z-40 w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-xl transition-all hover:scale-110 active:scale-90 cursor-pointer"
+        style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 4px 16px rgba(0,0,0,0.3)' }}
+        aria-label="Scroll to top"
+        title="Scroll to top"
+      >
+        ↑
+      </button>
     </div>
   )
 }

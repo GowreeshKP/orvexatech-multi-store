@@ -7,6 +7,7 @@ import type { TenantConfig } from '@/types/tenant'
 import { resolveTenantSlug, resolveApplicationLayer, type ApplicationLayer } from '@/lib/tenant-resolver'
 import { mockStore } from '@/api/mock-store'
 import { MOCK_TENANTS } from '@/data/mock-tenants'
+import { useAuth } from '@/context/AuthContext'
 
 // Deep-clone a tenant config so React detects nested theme changes
 function deepCloneTenant(config: TenantConfig): TenantConfig {
@@ -46,10 +47,26 @@ export function useSwitchLayer() {
 }
 
 export function TenantProvider({ children }: { children: ReactNode }) {
+  const auth = useAuth()
   const [tenant, setTenant] = useState<TenantConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Derive layer from auth role when authenticated; fall back to URL detection otherwise
+  const deriveLayer = useCallback((): ApplicationLayer => {
+    if (auth.isAuthenticated && auth.session?.role) {
+      if (auth.session.role === 'super_admin') return 'admin'
+      if (auth.session.role === 'seller' || auth.session.role === 'staff') return 'dashboard'
+    }
+    return resolveApplicationLayer()
+  }, [auth.isAuthenticated, auth.session?.role])
+
   const [layer, setLayer] = useState<ApplicationLayer>(() => resolveApplicationLayer())
+
+  // Re-derive layer whenever auth state changes
+  useEffect(() => {
+    setLayer(deriveLayer())
+  }, [deriveLayer])
 
   const loadTenant = useCallback((customSlug?: string) => {
     try {

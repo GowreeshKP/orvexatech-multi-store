@@ -326,6 +326,47 @@ class MockPlatformStore {
     return newTenant
   }
 
+  submitApplication(appData: {
+    brandName: string
+    ownerName: string
+    ownerEmail: string
+    phone: string
+    niche: string
+    requestedSlug: string
+    message?: string
+  }): TenantApplication {
+    const slug = appData.requestedSlug.toLowerCase().replace(/[^a-z0-9-]/g, '') || 'store'
+    const id = `app_${slug}_${Date.now()}`
+    const newApp: TenantApplication = {
+      id,
+      brandName: appData.brandName,
+      ownerName: appData.ownerName,
+      ownerEmail: appData.ownerEmail,
+      phone: appData.phone,
+      niche: appData.niche || 'Fashion & Apparel',
+      requestedSlug: slug,
+      message: appData.message || 'Client application submitted via Orvexa Cloud platform portal',
+      submittedAt: new Date().toISOString().split('T')[0],
+      status: 'pending',
+    }
+    this.applications.set(id, newApp)
+    this.persist()
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('orvexa:application-submitted', { detail: newApp }))
+    }
+    return newApp
+  }
+
+  isSlugAvailable(slug: string): boolean {
+    const clean = slug.toLowerCase().replace(/[^a-z0-9-]/g, '')
+    if (!clean) return false
+    const existingTenant = Array.from(this.tenants.values()).some((t) => t.slug === clean)
+    const existingPending = Array.from(this.applications.values()).some(
+      (a) => a.requestedSlug === clean && a.status === 'pending'
+    )
+    return !existingTenant && !existingPending
+  }
+
   rejectApplication(applicationId: string): void {
     const app = this.applications.get(applicationId)
     if (app) {

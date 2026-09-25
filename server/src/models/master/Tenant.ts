@@ -1,6 +1,15 @@
 // --- Master Database: Tenant Store Registry Model ---
 import { Schema, type Connection, type Model, type Document } from 'mongoose'
 
+export interface IStaffMember {
+  id: string
+  name: string
+  email: string
+  passwordHash: string
+  role: 'staff' | 'manager'
+  createdAt: string
+}
+
 export interface ITenant extends Document {
   id: string
   slug: string
@@ -13,6 +22,7 @@ export interface ITenant extends Document {
   customDomain?: string
   customMongoUri?: string // Bring-Your-Own-Database URI
   customDbName?: string // Custom MongoDB Database Name
+  staffMembers: IStaffMember[]
   status: 'active' | 'suspended' | 'pending'
   plan: 'starter' | 'growth' | 'pro' | 'enterprise'
   createdAt: string
@@ -56,6 +66,19 @@ export const TenantSchema = new Schema<ITenant>(
     customDomain: { type: String, default: '' },
     customMongoUri: { type: String, default: '' },
     customDbName: { type: String, default: '' },
+    staffMembers: {
+      type: [
+        {
+          id: { type: String, required: true },
+          name: { type: String, required: true },
+          email: { type: String, required: true },
+          passwordHash: { type: String, required: true },
+          role: { type: String, enum: ['staff', 'manager'], default: 'staff' },
+          createdAt: { type: String, default: () => new Date().toISOString() },
+        },
+      ],
+      default: [],
+    },
     status: { type: String, enum: ['active', 'suspended', 'pending'], default: 'active' },
     plan: { type: String, enum: ['starter', 'growth', 'pro', 'enterprise'], default: 'starter' },
     createdAt: { type: String, default: () => new Date().toISOString() },

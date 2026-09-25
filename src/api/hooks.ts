@@ -202,6 +202,15 @@ export function useAdminApplications(): {
   applications: TenantApplication[]
   approve: (id: string) => TenantConfig | null
   reject: (id: string) => void
+  submitApplication: (appData: {
+    brandName: string
+    ownerName: string
+    ownerEmail: string
+    phone: string
+    niche: string
+    requestedSlug: string
+    message?: string
+  }) => TenantApplication
   refresh: () => void
 } {
   const [applications, setApplications] = useState<TenantApplication[]>([])
@@ -212,6 +221,14 @@ export function useAdminApplications(): {
 
   useEffect(() => {
     refresh()
+
+    const handleNewApp = () => {
+      refresh()
+    }
+    window.addEventListener('orvexa:application-submitted', handleNewApp)
+    return () => {
+      window.removeEventListener('orvexa:application-submitted', handleNewApp)
+    }
   }, [refresh])
 
   const approve = useCallback((id: string): TenantConfig | null => {
@@ -225,7 +242,24 @@ export function useAdminApplications(): {
     refresh()
   }, [refresh])
 
-  return { applications, approve, reject, refresh }
+  const submitApplication = useCallback(
+    (appData: {
+      brandName: string
+      ownerName: string
+      ownerEmail: string
+      phone: string
+      niche: string
+      requestedSlug: string
+      message?: string
+    }) => {
+      const newApp = mockStore.submitApplication(appData)
+      refresh()
+      return newApp
+    },
+    [refresh]
+  )
+
+  return { applications, approve, reject, submitApplication, refresh }
 }
 
 export function usePlatformStats(): { stats: PlatformStats | null; loading: boolean } {

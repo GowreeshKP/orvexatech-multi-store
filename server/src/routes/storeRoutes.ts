@@ -3,6 +3,8 @@ import { tenantResolver } from '../middleware/tenantResolver.js'
 import { requireSeller, requireTenantAccess } from '../middleware/authMiddleware.js'
 import { closeTenantConnection, getTenantConnection, connectMasterDatabase } from '../config/db.js'
 import { getTenantModel } from '../models/master/Tenant.js'
+import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 
 const router = Router({ mergeParams: true })
 
@@ -333,6 +335,108 @@ router.put('/database-config', requireSeller, requireTenantAccess, async (req: R
     })
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to update database config' })
+  }
+})
+
+// ====================================================================
+// 6. STAFF MANAGEMENT (Merchant manages their own store's staff)
+// ====================================================================
+
+// GET own store staff — merchant only
+router.get('/staff', requireSeller, requireTenantAccess, async (req: Request, res: Response) => {
+  try {
+    const masterDb = await connectMasterDatabase()
+    const Tenant = getTenantModel(masterDb)
+    const tenant = await Tenant.findOne({ slug: req.tenant!.slug })
+
+    if (!tenant) {
+      res.status(404).json({ error: 'Store not found.' })
+      return
+    }
+
+    // Never expose passwordHash
+    const staff = tenant.staffMembers.map(({ id, name, email, role, createdAt }) => ({
+      id,
+      name,
+      email,
+      role,
+      createdAt,
+    }))
+
+    res.json({ staff })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch staff' })
+  }
+})
+
+// POST add staff to own store — merchant only
+router.post('/staff', requireSeller, requireTenantAccess, async (req: Request, res: Response) => {
+  try {
+    const { name, email, password, role = 'staff' } = req.body
+
+    if (!name || !email || !password || password.length < 8) {
+      res.status(400).json({ error: 'name, email, and password (min 8 chars) are required.' })
+      return
+    }
+
+    if (!['staff', 'manager'].includes(role)) {
+      res.status(400).json({ error: 'role must be "staff" or "manager".' })
+      return
+    }
+
+    const masterDb = await connectMasterDatabase()
+    const Tenant = getTenantModel(masterDb)
+    const tenant = await Tenant.findOne({ slug: req.tenant!.slug })
+
+    if (!tenant) {
+      res.status(404).json({ error: 'Store not found.' })
+      return
+    }
+
+    const exists = tenant.staffMembers.find(
+      (s) => s.email.toLowerCase() === email.trim().toLowerCase()
+    )
+    if (exists) {
+      res.status(409).json({ error: 'A staff member with this email already exists for your store.' })
+      return
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12)
+    const newStaff = {
+      id: `staff_${crypto.randomBytes(6).toString('hex')}`,
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      passwordHash,
+      role,
+      createdAt: new Date().toISOString(),
+    }
+
+    await Tenant.findOneAndUpdate(
+      { slug: req.tenant!.slug },
+      { $push: { staffMembers: newStaff } }
+    )
+
+    res.status(201).json({
+      success: true,
+      staff: { id: newStaff.id, name: newStaff.name, email: newStaff.email, role: newStaff.role, createdAt: newStaff.createdAt },
+    })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to add staff member' })
+  }
+})
+
+// DELETE remove staff from own store — merchant only
+router.delete('/staff/:staffId', requireSeller, requireTenantAccess, async (req: Request, res: Response) => {
+  try {
+    const masterDb = await connectMasterDatabase()
+    const Tenant = getTenantModel(masterDb)
+    await Tenant.findOneAndUpdate(
+      { slug: req.tenant!.slug },
+      { $pull: { staffMembers: { id: req.params.staffId } } }
+    )
+    res.json({ success: true, message: 'Staff member removed.' })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to remove staff member' })
   }
 })
 

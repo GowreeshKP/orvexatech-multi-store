@@ -206,7 +206,7 @@ class ApiClient {
       body: JSON.stringify({ status }),
     })
     if (status === 'approved') {
-      mockStore.approveApplication(id)
+      mockStore.approveTenant(id)
     } else {
       mockStore.rejectApplication(id)
     }

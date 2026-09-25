@@ -137,89 +137,119 @@ export default function DashboardApp() {
   }
 
   return (
-    <div className="min-h-screen bg-stone-100 flex font-sans antialiased text-black">
+    <div className="min-h-screen flex font-sans antialiased text-black" style={{ background: '#f1f0ef' }}>
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 bg-black text-white px-5 py-3 rounded-lg shadow-2xl border border-white/20 text-xs font-semibold tracking-wider uppercase flex items-center gap-3 animate-slide-down">
-          <span className="text-emerald-400 font-bold text-sm">✓</span>
+        <div
+          className="fixed top-5 right-5 z-50 text-white px-5 py-3.5 text-xs font-bold tracking-wider uppercase flex items-center gap-3 animate-slide-down"
+          style={{ background: 'rgba(0,0,0,0.92)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '10px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
+        >
+          <span className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-[10px] font-black flex-shrink-0">✓</span>
           <span>{toastMessage}</span>
         </div>
       )}
 
       {/* Sidebar */}
       <aside
-        className={`${sidebarCollapsed ? 'w-16' : 'w-64'} bg-white border-r border-black/10 flex flex-col transition-all duration-300 flex-shrink-0 z-30`}
+        className={`${sidebarCollapsed ? 'w-[68px]' : 'w-64'} flex flex-col transition-all duration-300 flex-shrink-0 z-30 scroll-styled-dark`}
+        style={{ background: 'linear-gradient(180deg, #0c0c14 0%, #111118 50%, #0a0a10 100%)', borderRight: '1px solid rgba(255,255,255,0.06)' }}
       >
         {/* Brand Header */}
-        <div className="h-16 border-b border-black/10 flex items-center px-4 gap-3">
+        <div className={`h-16 flex items-center gap-3 flex-shrink-0 ${sidebarCollapsed ? 'px-3 justify-center' : 'px-4'}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
           {tenant?.logo || tenant?.theme?.logoUrl ? (
             <img
               src={tenant.logo || tenant.theme?.logoUrl}
               alt=""
-              className="h-8 w-8 object-contain rounded bg-stone-50 border border-black/5"
+              className="h-8 w-8 object-contain rounded-lg flex-shrink-0"
+              style={{ border: '1px solid rgba(255,255,255,0.1)' }}
             />
           ) : (
             <div
-              className="w-8 h-8 rounded text-white flex items-center justify-center text-xs font-bold shadow-xs"
-              style={{ backgroundColor: tenant?.theme?.primaryColor || '#111' }}
+              className="w-8 h-8 rounded-lg text-white flex items-center justify-center text-xs font-black shadow-lg flex-shrink-0"
+              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
             >
               {tenant?.brandName?.charAt(0) || 'S'}
             </div>
           )}
           {!sidebarCollapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold truncate">{tenant?.brandName || 'My Store'}</p>
-              <p className="text-[10px] text-black/40 uppercase tracking-wider font-semibold truncate">
+              <p className="text-sm font-bold text-white truncate">{tenant?.brandName || 'My Store'}</p>
+              <p className="text-[10px] font-mono uppercase tracking-wider truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>
                 {session.name}
               </p>
             </div>
           )}
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="text-black/30 hover:text-black text-xs cursor-pointer p-1"
+            className="text-xs cursor-pointer p-1.5 rounded-md transition-all flex-shrink-0"
+            style={{ color: 'rgba(255,255,255,0.3)', background: 'transparent' }}
             title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            onMouseEnter={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.7)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.3)')}
           >
             {sidebarCollapsed ? '→' : '←'}
           </button>
         </div>
 
         {/* Nav Items */}
-        <nav className="flex-1 py-4 px-2 space-y-1">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveView(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${
-                activeView === item.id
-                  ? 'bg-black text-white shadow-sm font-bold'
-                  : 'text-black/60 hover:bg-stone-100 hover:text-black'
-              }`}
-            >
-              <span className="text-base">{item.icon}</span>
-              {!sidebarCollapsed && <span>{item.label}</span>}
-            </button>
-          ))}
+        <nav className="flex-1 py-4 px-2 space-y-0.5 overflow-y-auto scroll-styled-dark">
+          {NAV_ITEMS.map((item) => {
+            const isActive = activeView === item.id
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveView(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer relative ${
+                  sidebarCollapsed ? 'justify-center' : ''
+                }`}
+                style={isActive ? {
+                  background: 'linear-gradient(90deg, rgba(139,92,246,0.25) 0%, rgba(99,102,241,0.12) 100%)',
+                  borderLeft: '3px solid #8b5cf6',
+                  color: 'white',
+                  borderRadius: '0 8px 8px 0',
+                } : {
+                  borderLeft: '3px solid transparent',
+                  color: 'rgba(255,255,255,0.4)',
+                  borderRadius: '0 8px 8px 0',
+                }}
+                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'rgba(255,255,255,0.8)' } }}
+                onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.4)' } }}
+              >
+                <span className="text-base flex-shrink-0">{item.icon}</span>
+                {!sidebarCollapsed && <span>{item.label}</span>}
+                {isActive && !sidebarCollapsed && (
+                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0" />
+                )}
+              </button>
+            )
+          })}
         </nav>
 
         {/* Quick Links & Sign Out */}
-        <div className="p-4 border-t border-black/10 space-y-2">
+        <div className="p-3 space-y-1 flex-shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
           <a
             href={`/?tenant=${tenant?.slug || 'lunar'}`}
             target="_blank"
             rel="noopener noreferrer"
-            className={`flex items-center gap-2 text-xs font-bold tracking-wider text-black/70 hover:text-black transition-colors ${
+            className={`flex items-center gap-2 text-[11px] font-bold tracking-wider px-3 py-2.5 rounded-lg transition-all ${
               sidebarCollapsed ? 'justify-center' : ''
             }`}
+            style={{ color: 'rgba(255,255,255,0.4)' }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.85)'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; e.currentTarget.style.background = 'transparent' }}
           >
             <span>🌐</span>
             {!sidebarCollapsed && <span>Live Storefront ↗</span>}
           </a>
           <button
             onClick={handleLogout}
-            className={`w-full flex items-center gap-2 text-xs font-bold text-red-600 hover:text-red-800 hover:bg-red-50 p-1.5 rounded-lg transition-colors cursor-pointer ${
+            className={`w-full flex items-center gap-2 text-[11px] font-bold px-3 py-2.5 rounded-lg transition-all cursor-pointer ${
               sidebarCollapsed ? 'justify-center' : ''
             }`}
+            style={{ color: 'rgba(239,68,68,0.7)' }}
             title="Sign Out"
+            onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = 'rgba(239,68,68,0.08)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(239,68,68,0.7)'; e.currentTarget.style.background = 'transparent' }}
           >
             <span>🚪</span>
             {!sidebarCollapsed && <span>Sign Out</span>}
@@ -228,36 +258,38 @@ export default function DashboardApp() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto min-w-0 flex flex-col">
+      <main className="flex-1 overflow-y-auto min-w-0 flex flex-col scroll-styled">
         {/* Top Bar */}
-        <header className="h-16 bg-white border-b border-black/10 flex items-center justify-between px-8 sticky top-0 z-20 shadow-xs">
+        <header className="h-16 flex items-center justify-between px-6 sticky top-0 z-20" style={{ background: 'rgba(241,240,239,0.85)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
           <div className="flex items-center gap-3">
-            <h1 className="text-base md:text-lg font-bold">
+            <h1 className="text-base font-bold text-black">
               {NAV_ITEMS.find((n) => n.id === activeView)?.label || 'Seller Portal'}
             </h1>
-            <span className="hidden sm:inline-block text-xs text-black/30">|</span>
-            <span className="hidden sm:inline-block text-xs font-mono text-black/50">
+            <span className="hidden sm:inline-block text-xs" style={{ color: 'rgba(0,0,0,0.2)' }}>|</span>
+            <span className="hidden sm:inline-block text-xs font-mono" style={{ color: 'rgba(0,0,0,0.4)' }}>
               {tenant?.brandName} ({tenant?.slug}.orvexatech.com)
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <button
               onClick={() => switchLayer('storefront', tenant?.slug || 'lunar')}
-              className="text-xs bg-black text-white hover:bg-stone-800 font-bold px-3.5 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
-              title="View your live storefront with latest saved changes"
+              className="text-xs font-bold px-3.5 py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-white"
+              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 2px 10px rgba(99,102,241,0.3)' }}
+              title="View your live storefront"
             >
               <span>🏬</span>
-              <span>Open Storefront ↗</span>
+              <span className="hidden sm:inline">Open Storefront ↗</span>
             </button>
             <button
               onClick={handleLogout}
-              className="text-xs bg-stone-100 hover:bg-red-50 hover:text-red-700 text-black font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 border border-black/10 cursor-pointer"
+              className="text-xs font-semibold px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 border cursor-pointer"
+              style={{ background: 'white', color: 'rgba(0,0,0,0.7)', border: '1px solid rgba(0,0,0,0.1)' }}
             >
               <span>🚪</span>
               <span className="hidden sm:inline">Sign Out</span>
             </button>
-            <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+            <span className="badge-active">
               {tenant?.status || 'Active'}
             </span>
           </div>
@@ -285,82 +317,119 @@ function DashboardOverview({ onNavigate }: { onNavigate: (view: DashboardView) =
   const { tenant } = useTenant()
 
   if (loading || !stats) {
-    return <div className="text-sm text-black/40">Loading analytics...</div>
+    return (
+      <div className="space-y-6">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-32 rounded-2xl shimmer-bg" />
+        ))}
+      </div>
+    )
   }
 
   const kpis = [
-    { label: 'Total Revenue', value: `₹${stats.revenue.toLocaleString()}`, change: `+${stats.revenueChange}%`, icon: '💰' },
-    { label: 'Total Orders', value: stats.orderCount.toString(), change: `+${stats.orderCountChange}%`, icon: '📦' },
-    { label: 'Avg Order Value', value: `₹${Math.round(stats.averageOrderValue).toLocaleString()}`, change: 'Healthy', icon: '📈' },
-    { label: 'Total Customers', value: (stats.customerCount || 28).toString(), change: '+4 this week', icon: '👥' },
+    { label: 'Total Revenue', value: `₹${stats.revenue.toLocaleString()}`, change: `+${stats.revenueChange}%`, icon: '💰', trend: 'up', glowClass: 'kpi-card-glow-green', sparkData: [40,55,42,70,58,80,95] },
+    { label: 'Total Orders', value: stats.orderCount.toString(), change: `+${stats.orderCountChange}%`, icon: '📦', trend: 'up', glowClass: 'kpi-card-glow-blue', sparkData: [20,35,28,45,38,55,62] },
+    { label: 'Avg Order Value', value: `₹${Math.round(stats.averageOrderValue).toLocaleString()}`, change: 'Healthy', icon: '📈', trend: 'neutral', glowClass: 'kpi-card-glow-violet', sparkData: [65,70,68,72,70,75,78] },
+    { label: 'Total Customers', value: (stats.customerCount || 28).toString(), change: '+4 this week', icon: '👥', trend: 'up', glowClass: 'kpi-card-glow-amber', sparkData: [10,14,12,18,15,22,28] },
   ]
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
+    <div className="space-y-6 max-w-7xl mx-auto">
       {/* Welcome Banner */}
-      <div className="bg-gradient-to-r from-stone-900 to-black text-white p-6 md:p-8 rounded-2xl shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+      <div
+        className="text-white p-6 md:p-8 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-6"
+        style={{ background: 'linear-gradient(135deg, #0f0f1a 0%, #1a1040 50%, #0d1117 100%)', boxShadow: '0 8px 40px rgba(0,0,0,0.2)' }}
+      >
         <div>
-          <span className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">SELLER PORTAL</span>
-          <h2 className="text-2xl font-serif mt-1">Welcome back, {tenant?.ownerName || 'Merchant'}!</h2>
-          <p className="text-xs text-white/70 mt-1 max-w-xl">
-            Manage your product catalog, upload new high-resolution images, customize your homepage hero banners, and track real-time orders for {tenant?.brandName}.
+          <span className="text-[10px] font-mono tracking-[0.25em]" style={{ color: 'rgba(139,92,246,0.8)' }}>SELLER PORTAL • ORVEXA PLATFORM</span>
+          <h2 className="text-xl md:text-2xl mt-1" style={{ fontFamily: 'var(--font-display)' }}>Welcome back, {tenant?.ownerName || 'Merchant'}! 👋</h2>
+          <p className="text-xs mt-1 max-w-xl" style={{ color: 'rgba(255,255,255,0.55)' }}>
+            Manage catalog, upload images, customize homepage banners, and track real-time orders for <strong style={{ color: 'rgba(255,255,255,0.85)' }}>{tenant?.brandName}</strong>.
           </p>
         </div>
         <div className="flex gap-3 flex-wrap">
           <button
             onClick={() => onNavigate('products')}
-            className="bg-white text-black font-bold text-xs uppercase tracking-wider px-4 py-2.5 rounded-lg hover:bg-stone-200 transition-all cursor-pointer"
+            className="font-bold text-xs uppercase tracking-wider px-4 py-2.5 rounded-lg cursor-pointer transition-all text-black"
+            style={{ background: 'white', boxShadow: '0 2px 12px rgba(0,0,0,0.2)' }}
           >
             + Add Product
           </button>
           <button
             onClick={() => onNavigate('storefront')}
-            className="bg-white/20 text-white font-bold text-xs uppercase tracking-wider px-4 py-2.5 rounded-lg hover:bg-white/30 transition-all cursor-pointer border border-white/30"
+            className="font-bold text-xs uppercase tracking-wider px-4 py-2.5 rounded-lg cursor-pointer transition-all text-white"
+            style={{ background: 'rgba(139,92,246,0.3)', border: '1px solid rgba(139,92,246,0.4)' }}
           >
-            🎨 Edit Homepage Picture
+            🎨 Edit Homepage
           </button>
         </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpis.map((kpi) => (
-          <div key={kpi.label} className="bg-white rounded-xl p-6 border border-black/8 shadow-sm">
+          <div key={kpi.label} className={`bg-white rounded-2xl p-5 border border-black/6 shadow-sm ${kpi.glowClass} card-hover`}>
             <div className="flex items-center justify-between mb-4">
-              <span className="text-2xl">{kpi.icon}</span>
+              <span className="text-xl">{kpi.icon}</span>
               {kpi.change && (
-                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full">
-                  {kpi.change}
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  kpi.trend === 'up' ? 'text-emerald-700 bg-emerald-50 border border-emerald-100' :
+                  kpi.trend === 'down' ? 'text-red-600 bg-red-50 border border-red-100' :
+                  'text-blue-700 bg-blue-50 border border-blue-100'
+                }`}>
+                  {kpi.trend === 'up' ? '↑' : kpi.trend === 'down' ? '↓' : '→'} {kpi.change}
                 </span>
               )}
             </div>
-            <p className="text-2xl font-bold text-black">{kpi.value}</p>
-            <p className="text-xs text-black/40 font-bold tracking-wider uppercase mt-1">{kpi.label}</p>
+            {/* Sparkline mini chart */}
+            <div className="flex items-end gap-0.5 h-8 mb-3">
+              {kpi.sparkData.map((val, idx) => (
+                <div
+                  key={idx}
+                  className="flex-1 rounded-sm sparkline-bar"
+                  style={{ height: `${(val / Math.max(...kpi.sparkData)) * 100}%`, background: idx === kpi.sparkData.length - 1 ? '#6366f1' : 'rgba(99,102,241,0.2)' }}
+                />
+              ))}
+            </div>
+            <p className="text-2xl font-bold text-black animate-count-up">{kpi.value}</p>
+            <p className="text-[10px] text-black/40 font-bold tracking-widest uppercase mt-0.5">{kpi.label}</p>
           </div>
         ))}
       </div>
 
-      {/* Revenue Chart */}
-      <div className="bg-white rounded-xl p-6 border border-black/8 shadow-sm">
+      {/* Revenue Chart - Full Width SVG Area Chart */}
+      <div className="bg-white rounded-2xl p-6 border border-black/6 shadow-sm">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xs font-bold tracking-wider uppercase text-black/50">Revenue Trends (Last 7 Days)</h3>
-          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md">
-            +18.4% vs last period
-          </span>
+          <div>
+            <p className="text-[10px] font-bold tracking-widest uppercase text-black/40">Revenue Trend</p>
+            <h3 className="text-sm font-bold text-black mt-0.5">Last 7 Days Performance</h3>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-full">
+              ↑ +18.4% vs last period
+            </span>
+          </div>
         </div>
-        <div className="flex items-end gap-3 h-44 pt-4">
-          {stats.revenueByDay.map((day) => {
+        {/* SVG Bar Chart with gradient */}
+        <div className="flex items-end gap-3 h-52 pt-6">
+          {stats.revenueByDay.map((day, idx) => {
             const maxAmount = Math.max(...stats.revenueByDay.map((d) => d.amount)) || 1
-            const height = Math.max(12, (day.amount / maxAmount) * 100)
+            const height = Math.max(8, (day.amount / maxAmount) * 100)
+            const isLast = idx === stats.revenueByDay.length - 1
             return (
-              <div key={day.date} className="flex-1 flex flex-col items-center gap-2 group">
-                <span className="text-[10px] font-bold text-black/50 group-hover:text-black transition-colors">
+              <div key={day.date} className="flex-1 flex flex-col items-center gap-2 group cursor-default">
+                <span className="text-[10px] font-bold text-black/0 group-hover:text-black/70 transition-colors">
                   ₹{(day.amount / 1000).toFixed(1)}k
                 </span>
-                <div
-                  className="w-full bg-stone-900 group-hover:bg-black rounded-t-md transition-all duration-300"
-                  style={{ height: `${height}%` }}
-                />
+                <div className="w-full flex flex-col justify-end flex-1 relative">
+                  <div
+                    className="w-full rounded-t-lg transition-all duration-500 relative overflow-hidden"
+                    style={{ height: `${height}%`, background: isLast ? 'linear-gradient(to top, #6366f1, #8b5cf6)' : 'linear-gradient(to top, rgba(99,102,241,0.5), rgba(139,92,246,0.3))' }}
+                  >
+                    {/* Shimmer on hover */}
+                    <div className="absolute inset-0 opacity-0 group-hover:opacity-40 transition-opacity" style={{ background: 'linear-gradient(to top, rgba(255,255,255,0.3), transparent)' }} />
+                  </div>
+                </div>
                 <span className="text-[10px] text-black/50 font-medium">{day.date}</span>
               </div>
             )
@@ -369,14 +438,14 @@ function DashboardOverview({ onNavigate }: { onNavigate: (view: DashboardView) =
       </div>
 
       {/* Recent Orders + Top Products Side by Side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Recent Orders */}
-        <div className="bg-white rounded-xl p-6 border border-black/8 shadow-sm">
+        <div className="bg-white rounded-2xl p-6 border border-black/6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xs font-bold tracking-wider uppercase text-black/50">Recent Orders</h3>
+            <h3 className="text-[10px] font-bold tracking-widest uppercase text-black/40">Recent Orders</h3>
             <button
               onClick={() => onNavigate('orders')}
-              className="text-xs font-bold text-black hover:underline cursor-pointer"
+              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer transition-colors"
             >
               View All →
             </button>
@@ -384,21 +453,21 @@ function DashboardOverview({ onNavigate }: { onNavigate: (view: DashboardView) =
           {stats.recentOrders.length === 0 ? (
             <p className="text-sm text-black/40 py-8 text-center">No orders yet</p>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-0 divide-y divide-black/5">
               {stats.recentOrders.map((order) => (
-                <div key={order.id} className="flex items-center justify-between py-2.5 border-b border-black/5 last:border-0">
+                <div key={order.id} className="flex items-center justify-between py-3">
                   <div>
-                    <p className="text-xs font-bold font-mono">{order.id}</p>
-                    <p className="text-xs text-black/60">{order.customer} • {order.date}</p>
+                    <p className="text-xs font-bold font-mono text-black">{order.id}</p>
+                    <p className="text-[11px] text-black/50 mt-0.5">{order.customer} • {order.date}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-bold">₹{order.total.toLocaleString()}</p>
+                    <p className="text-sm font-bold text-black">₹{order.total.toLocaleString()}</p>
                     <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                      order.status === 'Delivered' ? 'bg-emerald-50 text-emerald-700' :
-                      order.status === 'In Transit' ? 'bg-blue-50 text-blue-700' :
-                      'bg-amber-50 text-amber-700'
+                      order.status === 'Delivered' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
+                      order.status === 'In Transit' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
+                      'bg-amber-50 text-amber-700 border border-amber-100'
                     }`}>
-                      {order.status}
+                      {order.status === 'In Transit' && '● '}{order.status}
                     </span>
                   </div>
                 </div>
@@ -407,33 +476,42 @@ function DashboardOverview({ onNavigate }: { onNavigate: (view: DashboardView) =
           )}
         </div>
 
-        {/* Top Products */}
-        <div className="bg-white rounded-xl p-6 border border-black/8 shadow-sm">
+        {/* Top Products Leaderboard */}
+        <div className="bg-white rounded-2xl p-6 border border-black/6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xs font-bold tracking-wider uppercase text-black/50">Top Selling Products</h3>
+            <h3 className="text-[10px] font-bold tracking-widest uppercase text-black/40">Top Products by Revenue</h3>
             <button
               onClick={() => onNavigate('products')}
-              className="text-xs font-bold text-black hover:underline cursor-pointer"
+              className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer transition-colors"
             >
-              Manage Catalog →
+              Manage →
             </button>
           </div>
           {stats.topProducts.length === 0 ? (
             <p className="text-sm text-black/40 py-8 text-center">No products yet</p>
           ) : (
             <div className="space-y-3">
-              {stats.topProducts.map((product, i) => (
-                <div key={product.name} className="flex items-center justify-between py-2.5 border-b border-black/5 last:border-0">
-                  <div className="flex items-center gap-3 min-w-0 pr-2">
-                    <span className="text-xs font-mono text-black/40 w-5 font-bold">#{i + 1}</span>
-                    <p className="text-xs font-bold text-black truncate">{product.name}</p>
+              {stats.topProducts.map((product, i) => {
+                const maxRev = Math.max(...stats.topProducts.map(p => p.revenue)) || 1
+                const pct = Math.round((product.revenue / maxRev) * 100)
+                return (
+                  <div key={product.name} className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0 pr-2">
+                        <span className="text-[10px] font-mono font-bold text-black/30 w-4">#{i + 1}</span>
+                        <p className="text-xs font-bold text-black truncate">{product.name}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-xs font-bold text-black">₹{product.revenue.toLocaleString()}</p>
+                        <p className="text-[10px] text-black/40">{product.orders} sold</p>
+                      </div>
+                    </div>
+                    <div className="progress-bar">
+                      <div className="progress-bar-fill" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #6366f1, #8b5cf6)' }} />
+                    </div>
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-bold">₹{product.revenue.toLocaleString()}</p>
-                    <p className="text-[10px] text-black/40">{product.orders} units sold</p>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -1844,8 +1922,8 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
 
             {[
               {
-                label: 'Floating Breeze Animation Simulation',
-                desc: 'Soft cotton petals and stardust particles drifting in the background',
+                label: 'Ambient Glow Animation Simulation',
+                desc: 'Soft ethereal ambient lighting and interactive cursor spotlight',
                 val: enableAnimations,
                 toggle: () => setEnableAnimations(!enableAnimations),
               },

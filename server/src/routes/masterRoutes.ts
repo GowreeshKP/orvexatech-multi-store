@@ -5,6 +5,8 @@ import { getApplicationModel } from '../models/master/Application.js'
 import { getTenantOrderModel } from '../models/tenant/Order.js'
 import { provisionTenantFolders } from '../services/tenantProvisioner.js'
 import { requireAdmin } from '../middleware/authMiddleware.js'
+import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -13,6 +15,11 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const router = Router()
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALL routes in this router require Super Admin JWT
+// ─────────────────────────────────────────────────────────────────────────────
+router.use(requireAdmin)
 
 // GET platform analytics overview
 router.get('/overview', async (req: Request, res: Response) => {
@@ -244,6 +251,122 @@ router.put('/applications/:id/status', requireAdmin, async (req: Request, res: R
     res.json(updated)
   } catch (err: any) {
     res.status(400).json({ error: err.message || 'Failed to update application' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────
+// GET /api/admin/tenants/:slug/staff
+// List all staff members for a specific store
+// ─────────────────────────────────────────────────────────
+router.get('/tenants/:slug/staff', async (req: Request, res: Response) => {
+  try {
+    const masterDb = await connectMasterDatabase()
+    const Tenant = getTenantModel(masterDb)
+    const tenant = await Tenant.findOne({ slug: String(req.params.slug).toLowerCase() })
+
+    if (!tenant) {
+      res.status(404).json({ error: 'Tenant not found.' })
+      return
+    }
+
+    // Return staff without exposing passwordHash
+    const staff = tenant.staffMembers.map(({ id, name, email, role, createdAt }) => ({
+      id,
+      name,
+      email,
+      role,
+      createdAt,
+    }))
+
+    res.json({ tenantSlug: tenant.slug, staff })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch staff' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────
+// POST /api/admin/tenants/:slug/staff
+// Create a staff account for a specific store
+// Body: { name, email, password, role? }
+// ─────────────────────────────────────────────────────────
+router.post('/tenants/:slug/staff', async (req: Request, res: Response) => {
+  try {
+    const { name, email, password, role = 'staff' } = req.body
+
+    if (!name || !email || !password || password.length < 8) {
+      res.status(400).json({ error: 'name, email, and password (min 8 chars) are required.' })
+      return
+    }
+
+    if (!['staff', 'manager'].includes(role)) {
+      res.status(400).json({ error: 'role must be "staff" or "manager".' })
+      return
+    }
+
+    const masterDb = await connectMasterDatabase()
+    const Tenant = getTenantModel(masterDb)
+    const tenant = await Tenant.findOne({ slug: String(req.params.slug).toLowerCase() })
+
+    if (!tenant) {
+      res.status(404).json({ error: 'Tenant not found.' })
+      return
+    }
+
+    // Check for duplicate email within this tenant
+    const exists = tenant.staffMembers.find(
+      (s) => s.email.toLowerCase() === email.trim().toLowerCase()
+    )
+    if (exists) {
+      res.status(409).json({ error: 'A staff member with this email already exists for this store.' })
+      return
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12)
+    const newStaff = {
+      id: `staff_${crypto.randomBytes(6).toString('hex')}`,
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      passwordHash,
+      role,
+      createdAt: new Date().toISOString(),
+    }
+
+    await Tenant.findOneAndUpdate(
+      { slug: tenant.slug },
+      { $push: { staffMembers: newStaff } }
+    )
+
+    res.status(201).json({
+      success: true,
+      staff: { id: newStaff.id, name: newStaff.name, email: newStaff.email, role: newStaff.role, createdAt: newStaff.createdAt },
+    })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to create staff member' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────
+// DELETE /api/admin/tenants/:slug/staff/:staffId
+// Remove a staff member from a store
+// ─────────────────────────────────────────────────────────
+router.delete('/tenants/:slug/staff/:staffId', async (req: Request, res: Response) => {
+  try {
+    const masterDb = await connectMasterDatabase()
+    const Tenant = getTenantModel(masterDb)
+    const result = await Tenant.findOneAndUpdate(
+      { slug: String(req.params.slug).toLowerCase() },
+      { $pull: { staffMembers: { id: String(req.params.staffId) } } },
+      { new: true }
+    )
+
+    if (!result) {
+      res.status(404).json({ error: 'Tenant not found.' })
+      return
+    }
+
+    res.json({ success: true, message: 'Staff member removed.' })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to remove staff member' })
   }
 })
 
