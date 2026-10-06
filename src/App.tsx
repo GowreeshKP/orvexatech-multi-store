@@ -2,11 +2,15 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import DashboardApp from './layers/DashboardApp'
 import AdminApp from './layers/AdminApp'
 import { useApplicationLayer, useTenant, useSwitchLayer } from './context/TenantContext'
+import { useAuth } from './context/AuthContext'
 import { mockStore } from './api/mock-store'
+import { auditLogger } from './api/audit-logger'
+import { authService, DEFAULT_DEMO_SELLER_CREDENTIALS } from './api/auth'
 import { MOCK_TENANTS } from './data/mock-tenants'
 import type { TenantConfig } from './types/tenant'
-import AdminLoginModal from './components/auth/AdminLoginModal'
-import SellerLoginModal from './components/auth/SellerLoginModal'
+import CommonLoginModal from './components/auth/CommonLoginModal'
+import ResetPasswordModal from './components/auth/ResetPasswordModal'
+import { LegalComplianceModal, ComplianceFooterLinks, type ComplianceDocType } from './components/compliance/LegalComplianceModal'
 
 // --- THE LUNAR CLOTHING OFFICIAL PRODUCT DATASET ---
 export interface Product {
@@ -1064,6 +1068,7 @@ function WishlistDrawer({
   onRemoveWishlist,
   onSelectProduct,
 }: {
+  tenant?: TenantConfig
   isOpen: boolean
   onClose: () => void
   products: Product[]
@@ -1460,6 +1465,7 @@ function ShopByCategorySection({
   products,
   onSelectCategory,
 }: {
+  tenant?: TenantConfig
   products: Product[]
   onSelectCategory: (cat: string) => void
 }) {
@@ -1554,6 +1560,7 @@ function LeggingsFabricMatrix({
   products,
   onSelectProduct,
 }: {
+  tenant?: TenantConfig
   products: Product[]
   onSelectProduct: (id: number) => void
 }) {
@@ -1617,6 +1624,7 @@ function ActivityTriptych({
   products,
   onSelectProduct,
 }: {
+  tenant?: TenantConfig
   products: Product[]
   onSelectProduct: (id: number) => void
 }) {
@@ -1686,7 +1694,7 @@ function MissionBlock({
         </h2>
 
         <p className="text-xs sm:text-sm md:text-base font-light text-white/80 max-w-xl mx-auto mb-10 leading-relaxed font-sans">
-          {brandName} was created by {owner} with a genuine desire for less but better. Pure artisanal fabrics, conscious craftsmanship, and timeless quality created to last.
+          {brandName} was founded with a genuine desire for less but better. Pure artisanal fabrics, conscious craftsmanship, and timeless quality created to last.
         </p>
 
         <div className="flex items-center justify-center">
@@ -2969,24 +2977,33 @@ function CheckoutModal({
   )
 }
 
-// 15b. AUTHENTICATION MODAL (SIGN IN & REGISTER WITH EMAIL VERIFICATION)
+// 15b. AUTHENTICATION MODAL (CUSTOMER & STORE OWNER INTEGRATED PORTAL)
 function AuthModal({
   isOpen,
   onClose,
   onLoginSuccess,
+  tenant,
+  onSellerLoginSuccess,
 }: {
   isOpen: boolean
   onClose: () => void
   onLoginSuccess: (user: UserAccount, isNew?: boolean) => void
+  tenant?: TenantConfig
+  onSellerLoginSuccess?: () => void
 }) {
   const switchLayer = useSwitchLayer()
-  const [tab, setTab] = useState<'signin' | 'signup'>('signin')
+  const { login: authLogin } = useAuth()
+
+  // Tab state: customer sign in, customer register, store owner login, or password reset
+  const [tab, setTab] = useState<'signin' | 'signup' | 'seller' | 'seller-forgot' | 'seller-forgot-sent'>('signin')
+  
+  // Shopper sign in state
   const [signInEmail, setSignInEmail] = useState('priya.sharma@example.com')
   const [signInPassword, setSignInPassword] = useState('lunar123')
   const [showPassword, setShowPassword] = useState(false)
   const [signInError, setSignInError] = useState('')
 
-  // Sign up state
+  // Shopper sign up state
   const [signUpStep, setSignUpStep] = useState<'form' | 'otp'>('form')
   const [signUpName, setSignUpName] = useState('')
   const [signUpEmail, setSignUpEmail] = useState('')
@@ -2997,6 +3014,25 @@ function AuthModal({
   const [otpError, setOtpError] = useState('')
   const [resendTimer, setResendTimer] = useState(30)
 
+  // Store Owner / Merchant state
+  const brandName = tenant?.name || 'The Lunar Clothing'
+  const currentSlug = tenant?.slug || 'lunar'
+  const matchedSeller = DEFAULT_DEMO_SELLER_CREDENTIALS.find(
+    (c) => c.tenantSlug.toLowerCase() === currentSlug.toLowerCase()
+  ) || DEFAULT_DEMO_SELLER_CREDENTIALS[0]
+
+  const [sellerLoginId, setSellerLoginId] = useState(matchedSeller.loginId)
+  const [sellerPassword, setSellerPassword] = useState(matchedSeller.password)
+  const [sellerShowPassword, setSellerShowPassword] = useState(false)
+  const [sellerError, setSellerError] = useState('')
+  const [sellerLoading, setSellerLoading] = useState(false)
+
+  // Store Owner Forgot Password State
+  const [sellerForgotEmail, setSellerForgotEmail] = useState(matchedSeller.loginId)
+  const [sellerForgotLoading, setSellerForgotLoading] = useState(false)
+  const [sellerForgotError, setSellerForgotError] = useState<string | null>(null)
+  const [sellerForgotResetToken, setSellerForgotResetToken] = useState<string | null>(null)
+
   useEffect(() => {
     let interval: any
     if (signUpStep === 'otp' && resendTimer > 0) {
@@ -3005,14 +3041,38 @@ function AuthModal({
     return () => clearInterval(interval)
   }, [signUpStep, resendTimer])
 
+  // Sync default seller credentials if tenant changes
+  useEffect(() => {
+    if (matchedSeller) {
+      setSellerLoginId(matchedSeller.loginId)
+      setSellerPassword(matchedSeller.password)
+      setSellerForgotEmail(matchedSeller.loginId)
+    }
+  }, [matchedSeller])
+
   if (!isOpen) return null
 
+  // Shopper login handler
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault()
     if (!signInEmail || !signInPassword) {
       setSignInError('Please provide both email and password.')
       return
     }
+
+    // Smart detection: If user typed store owner email in customer tab, offer switch
+    if (
+      signInEmail.toLowerCase().includes('lunarclothing') ||
+      signInEmail.toLowerCase().includes('silkhaus') ||
+      signInEmail.toLowerCase().includes('khadistudio') ||
+      signInEmail.toLowerCase().includes('bloomweave')
+    ) {
+      setSellerLoginId(signInEmail)
+      setSellerPassword(signInPassword)
+      setTab('seller')
+      return
+    }
+
     const user: UserAccount = {
       name: signInEmail.includes('priya') ? 'Priya Sharma' : signInEmail.split('@')[0].toUpperCase(),
       email: signInEmail,
@@ -3029,6 +3089,75 @@ function AuthModal({
     setSignInError('')
   }
 
+  // Store owner quick fill
+  const handleFillSellerDemo = () => {
+    setSellerLoginId(matchedSeller.loginId)
+    setSellerPassword(matchedSeller.password)
+    setSellerError('')
+  }
+
+  // Store owner login handler
+  const handleSellerSignIn = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSellerLoading(true)
+    setSellerError('')
+
+    try {
+      // 1. Try unified auth context
+      try {
+        await authLogin({ type: 'seller', loginId: sellerLoginId, password: sellerPassword })
+      } catch {
+        // Fallback to local auth service
+      }
+
+      // 2. Perform direct seller login verification
+      const res = await authService.loginSeller(sellerLoginId, sellerPassword)
+      if (res.success) {
+        onClose()
+        if (onSellerLoginSuccess) {
+          onSellerLoginSuccess()
+        } else {
+          switchLayer('dashboard')
+        }
+      } else {
+        setSellerError(res.error || 'Invalid store owner login ID or password.')
+      }
+    } catch (err: any) {
+      setSellerError(err.message || 'Login failed. Please verify credentials.')
+    } finally {
+      setSellerLoading(false)
+    }
+  }
+
+  // Store owner forgot password handler
+  const handleSellerForgot = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSellerForgotError(null)
+    setSellerForgotLoading(true)
+    const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/seller/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: sellerForgotEmail }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setSellerForgotError(data.error || 'Failed to send reset email.')
+      } else {
+        setSellerForgotResetToken(data.resetToken || null)
+        setTab('seller-forgot-sent')
+      }
+    } catch {
+      // Local demo simulation fallback
+      setSellerForgotResetToken('rst-demo-' + Math.floor(100000 + Math.random() * 900000))
+      setTab('seller-forgot-sent')
+    } finally {
+      setSellerForgotLoading(false)
+    }
+  }
+
+  // Shopper registration OTP handlers
   const handleSendOtp = (e: React.FormEvent) => {
     e.preventDefault()
     if (!signUpName || !signUpEmail || !signUpPassword) {
@@ -3059,29 +3188,50 @@ function AuthModal({
     onClose()
   }
 
+  const isSellerTab = tab === 'seller' || tab === 'seller-forgot' || tab === 'seller-forgot-sent'
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white max-w-md w-full border border-black/10 shadow-2xl rounded-sm overflow-hidden animate-slide-down">
         {/* Header */}
-        <div className="bg-black text-white p-6 flex items-center justify-between">
+        <div className={`text-white p-6 flex items-center justify-between transition-colors ${
+          isSellerTab ? 'bg-slate-950 border-b border-blue-500/30' : 'bg-black'
+        }`}>
           <div className="flex items-center gap-3">
-            <img src="/lunar-logo.png" alt="Lunar" className="h-8 w-auto object-contain rounded-md" />
+            {tenant?.logo ? (
+              <img src={tenant.logo} alt={brandName} className="h-8 w-auto object-contain rounded-md bg-white/10 p-0.5" />
+            ) : (
+              <div className="w-8 h-8 rounded-md bg-white/20 flex items-center justify-center text-white font-serif font-bold text-sm">
+                {brandName.charAt(0)}
+              </div>
+            )}
             <div>
-              <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">THE LUNAR CLOTHING</p>
-              <h2 className="text-lg font-serif">Customer Portal & Tracking</h2>
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">{brandName}</p>
+                {isSellerTab && (
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                    Merchant Portal
+                  </span>
+                )}
+              </div>
+              <h2 className="text-lg font-serif">
+                {isSellerTab ? 'Store Owner & Staff Portal' : 'Customer Portal & Tracking'}
+              </h2>
             </div>
           </div>
-          <button onClick={onClose} className="text-white/70 hover:text-white text-xl cursor-pointer">
+          <button onClick={onClose} className="text-white/70 hover:text-white text-xl cursor-pointer" aria-label="Close">
             ✕
           </button>
         </div>
 
-        {/* Tab switch */}
-        <div className="flex border-b border-black/10 text-xs font-bold uppercase tracking-widest bg-stone-50">
+        {/* 3-Tab Switch (Sign In · Create Account · Store Owner) */}
+        <div className="flex border-b border-black/10 text-xs font-bold uppercase tracking-wider bg-stone-50">
           <button
             onClick={() => { setTab('signin'); setSignUpStep('form') }}
             className={`flex-1 py-3 text-center transition-colors cursor-pointer ${
-              tab === 'signin' ? 'bg-white text-black border-b-2 border-black' : 'text-black/50 hover:text-black'
+              tab === 'signin'
+                ? 'bg-white text-black border-b-2 border-black font-extrabold shadow-xs'
+                : 'text-black/50 hover:text-black'
             }`}
           >
             Sign In
@@ -3089,16 +3239,30 @@ function AuthModal({
           <button
             onClick={() => { setTab('signup'); setSignUpStep('form') }}
             className={`flex-1 py-3 text-center transition-colors cursor-pointer ${
-              tab === 'signup' ? 'bg-white text-black border-b-2 border-black' : 'text-black/50 hover:text-black'
+              tab === 'signup'
+                ? 'bg-white text-black border-b-2 border-black font-extrabold shadow-xs'
+                : 'text-black/50 hover:text-black'
             }`}
           >
             Create Account
           </button>
+          <button
+            onClick={() => { setTab('seller'); setSellerError('') }}
+            className={`flex-1 py-3 text-center transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+              isSellerTab
+                ? 'bg-blue-50 text-blue-900 border-b-2 border-blue-600 font-extrabold shadow-xs'
+                : 'text-blue-700 hover:text-blue-950 hover:bg-blue-50/50'
+            }`}
+          >
+            <span>🏬</span>
+            <span>Store Owner</span>
+          </button>
         </div>
 
-        {/* Content */}
+        {/* Content Body */}
         <div className="p-6">
-          {tab === 'signin' ? (
+          {/* ── 1. CUSTOMER SIGN IN ─────────────────────────────── */}
+          {tab === 'signin' && (
             <form onSubmit={handleSignIn} className="space-y-4 text-xs">
               <div className="bg-amber-50 border border-amber-200 p-3 text-[11px] text-amber-900 rounded-xs flex items-center justify-between">
                 <span>⚡ Test with demo account to view existing orders:</span>
@@ -3154,7 +3318,7 @@ function AuthModal({
               </button>
 
               <div className="text-center pt-2 text-black/50">
-                <span>New to The Lunar Clothing? </span>
+                <span>New to {brandName}? </span>
                 <button
                   type="button"
                   onClick={() => { setTab('signup'); setSignUpStep('form') }}
@@ -3163,8 +3327,199 @@ function AuthModal({
                   Register here
                 </button>
               </div>
+
+              {/* Seamless Store Owner Portal Switcher */}
+              <div className="mt-4 pt-3 border-t border-slate-200 flex items-center justify-between text-[11px] bg-blue-50/70 -mx-6 -mb-6 p-4 rounded-b-sm">
+                <div className="flex items-center gap-1.5 text-blue-900 font-medium">
+                  <span>🏬</span>
+                  <span>Store Owner or Staff?</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setTab('seller'); setSellerError('') }}
+                  className="font-bold underline text-blue-700 hover:text-blue-950 cursor-pointer"
+                >
+                  Login to Store Dashboard →
+                </button>
+              </div>
             </form>
-          ) : (
+          )}
+
+          {/* ── 2. STORE OWNER / MERCHANT LOGIN ────────────────── */}
+          {tab === 'seller' && (
+            <form onSubmit={handleSellerSignIn} className="space-y-4 text-xs">
+              <div className="bg-blue-50 border border-blue-200 p-3 text-[11px] text-blue-950 rounded-xs flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-blue-950 flex items-center gap-1">
+                    <span>⚡</span> <span>Demo Store Owner Credentials:</span>
+                  </p>
+                  <p className="text-[10px] text-blue-700 font-mono mt-0.5 truncate max-w-[220px]">
+                    {matchedSeller.loginId}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleFillSellerDemo}
+                  className="font-bold underline text-blue-900 hover:text-black cursor-pointer text-xs"
+                >
+                  Quick Fill
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">
+                  Store Owner Email or Slug *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={sellerLoginId}
+                  onChange={(e) => setSellerLoginId(e.target.value)}
+                  placeholder="e.g. gowreesh@thelunarclothing.com"
+                  className="w-full border border-slate-300 p-2.5 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 text-xs font-mono"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-slate-700 font-semibold">Dashboard Password *</label>
+                  <button
+                    type="button"
+                    onClick={() => setSellerShowPassword(!sellerShowPassword)}
+                    className="text-[10px] text-slate-500 hover:text-slate-800 cursor-pointer"
+                  >
+                    {sellerShowPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <input
+                  type={sellerShowPassword ? 'text' : 'password'}
+                  required
+                  value={sellerPassword}
+                  onChange={(e) => setSellerPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full border border-slate-300 p-2.5 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 text-xs"
+                />
+                <div className="flex justify-end mt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setSellerForgotError(null); setTab('seller-forgot') }}
+                    className="text-[11px] text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              </div>
+
+              {sellerError && (
+                <div className="p-2.5 rounded bg-red-50 border border-red-200 text-red-700 font-medium text-xs">
+                  {sellerError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={sellerLoading || !sellerLoginId || !sellerPassword}
+                className="w-full bg-blue-600 text-white font-bold text-xs tracking-[0.15em] uppercase py-3.5 mt-2 hover:bg-blue-700 transition-colors cursor-pointer shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {sellerLoading ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    <span>AUTHENTICATING…</span>
+                  </>
+                ) : (
+                  <span>SIGN IN TO STORE DASHBOARD →</span>
+                )}
+              </button>
+
+              <div className="text-center pt-2 text-slate-500">
+                <span>Looking for your personal customer orders? </span>
+                <button
+                  type="button"
+                  onClick={() => setTab('signin')}
+                  className="text-slate-900 font-bold underline cursor-pointer"
+                >
+                  Customer Sign In
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ── 3. STORE OWNER FORGOT PASSWORD ─────────────────── */}
+          {tab === 'seller-forgot' && (
+            <form onSubmit={handleSellerForgot} className="space-y-4 text-xs">
+              <div className="text-center pb-1">
+                <h3 className="font-bold text-sm text-slate-900">Reset Store Owner Password</h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Enter your store administrator email to receive a password reset link.
+                </p>
+              </div>
+
+              {sellerForgotError && (
+                <div className="p-2.5 rounded bg-red-50 border border-red-200 text-red-700 font-medium text-xs">
+                  {sellerForgotError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">Account Email *</label>
+                <input
+                  type="email"
+                  required
+                  value={sellerForgotEmail}
+                  onChange={(e) => setSellerForgotEmail(e.target.value)}
+                  placeholder="e.g. gowreesh@thelunarclothing.com"
+                  className="w-full border border-slate-300 p-2.5 outline-none focus:border-blue-600 text-xs font-mono"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={sellerForgotLoading || !sellerForgotEmail}
+                className="w-full bg-blue-600 text-white font-bold text-xs tracking-wider uppercase py-3 hover:bg-blue-700 transition-colors cursor-pointer shadow-sm disabled:opacity-50"
+              >
+                {sellerForgotLoading ? 'Sending Reset Link…' : 'SEND RESET LINK →'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTab('seller')}
+                className="w-full text-center text-slate-600 hover:text-slate-900 underline text-xs cursor-pointer"
+              >
+                ← Back to Store Owner Login
+              </button>
+            </form>
+          )}
+
+          {/* ── 4. STORE OWNER FORGOT SENT ─────────────────────── */}
+          {tab === 'seller-forgot-sent' && (
+            <div className="space-y-4 text-center text-xs">
+              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center text-xl mx-auto font-bold">
+                ✉
+              </div>
+              <h3 className="text-sm font-bold text-slate-900">Check Your Inbox</h3>
+              <p className="text-slate-600 leading-relaxed text-[11px]">
+                If an account with <strong className="text-slate-900">{sellerForgotEmail}</strong> exists, instructions to reset your dashboard password have been dispatched.
+              </p>
+
+              {sellerForgotResetToken && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded text-left text-[11px]">
+                  <p className="font-bold text-amber-900">⚡ Dev Mode — Reset Token:</p>
+                  <p className="font-mono text-[10px] text-amber-800 break-all mt-0.5">{sellerForgotResetToken}</p>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setTab('seller')}
+                className="w-full bg-slate-900 text-white font-bold py-2.5 uppercase tracking-wider text-xs hover:bg-slate-800 cursor-pointer"
+              >
+                Return to Login
+              </button>
+            </div>
+          )}
+
+          {/* ── 5. CUSTOMER CREATE ACCOUNT (SIGN UP) ────────────── */}
+          {tab === 'signup' && (
             <div>
               {signUpStep === 'form' ? (
                 <form onSubmit={handleSendOtp} className="space-y-3.5 text-xs">
@@ -4205,12 +4560,12 @@ function CatalogPage({
 // 18. FOOTER COMPONENT
 function Footer({
   tenant,
-  onOpenSellerLogin,
-  onOpenAdminLogin,
+  onOpenLogin,
+  onOpenComplianceDoc,
 }: {
   tenant?: TenantConfig
-  onOpenSellerLogin?: () => void
-  onOpenAdminLogin?: () => void
+  onOpenLogin?: () => void
+  onOpenComplianceDoc?: (doc: ComplianceDocType) => void
 }) {
   const brandName = tenant?.name || 'THE LUNAR CLOTHING'
   const brandTagline = tenant?.tagline || 'Handcrafted 100% soft cotton maxis, artisanal block prints, and festive dresses with functional side pockets.'
@@ -4293,13 +4648,8 @@ function Footer({
               <h4 className="text-[10px] font-bold tracking-[0.25em] uppercase text-white/30 mb-5">PORTAL ACCESS</h4>
               <ul className="space-y-3 text-xs">
                 <li>
-                  <button onClick={onOpenSellerLogin} className="flex items-center gap-2 text-stone-300 hover:text-white font-medium transition-colors cursor-pointer">
-                    <span>🏬</span><span>Seller Portal Login</span>
-                  </button>
-                </li>
-                <li>
-                  <button onClick={onOpenAdminLogin} className="flex items-center gap-2 text-stone-400 hover:text-white font-medium transition-colors cursor-pointer">
-                    <span>🛡️</span><span>Super Admin Login</span>
+                  <button onClick={onOpenLogin} className="flex items-center gap-2 text-stone-300 hover:text-white font-medium transition-colors cursor-pointer">
+                    <span>🔐</span><span>Portal & Console Login</span>
                   </button>
                 </li>
                 <li><a href="#" className="text-white/60 hover:text-white transition-colors">Apply as Merchant</a></li>
@@ -4328,17 +4678,42 @@ function Footer({
           </form>
         </div>
 
-        {/* Bottom Bar */}
-        <div className="border-t border-white/8 pt-6 flex flex-col md:flex-row items-center justify-between gap-4 text-[10px] text-white/30">
-          <p className="font-mono">© {new Date().getFullYear()} {brandName}. All rights reserved.</p>
-          <div className="flex gap-8 uppercase tracking-widest">
-            <a href="#" className="hover:text-white/60 transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-white/60 transition-colors">Terms of Service</a>
-            <span>INDIA ({tenant?.currencySymbol || '₹'} {tenant?.currency || 'INR'})</span>
-            <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Powered by Orvexa
-            </span>
+        {/* Compliance Links Strip & Bottom Bar */}
+        <div className="border-t border-white/8 pt-8 space-y-6">
+          {/* Exact OrvexaTech Compliance Links: GDPR · INDIA DPDP · EU AI ACT READY + Privacy · Cookies · Accessibility */}
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <div>
+              <p className="text-[10px] font-mono uppercase tracking-widest text-white/40 mb-2">Compliance & Data Protection</p>
+              {onOpenComplianceDoc ? (
+                <ComplianceFooterLinks onOpenComplianceDoc={onOpenComplianceDoc} theme="dark" />
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-6 font-mono text-[11px] uppercase tracking-wider text-sky-400 underline decoration-dotted underline-offset-4">
+                    <span>GDPR</span>
+                    <span>INDIA DPDP</span>
+                    <span>EU AI ACT READY</span>
+                  </div>
+                  <div className="flex items-center gap-6 text-xs text-sky-400/70">
+                    <span>Privacy</span>
+                    <span>Cookies</span>
+                    <span>Accessibility</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 text-[10px] text-white/40 uppercase tracking-widest">
+              <span>INDIA ({tenant?.currencySymbol || '₹'} {tenant?.currency || 'INR'})</span>
+              <span className="flex items-center gap-1.5 text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Powered by Orvexa
+              </span>
+            </div>
+          </div>
+
+          <div className="border-t border-white/5 pt-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-[10px] text-white/30 font-mono">
+            <p>© {new Date().getFullYear()} {brandName}. All rights reserved.</p>
+            <p>Enterprise Multi-Tenant Infrastructure • 100% Isolated Database Architecture</p>
           </div>
         </div>
       </div>
@@ -4349,6 +4724,7 @@ function Footer({
 // --- MAIN APP COMPONENT ---
 export default function App() {
   const layer = useApplicationLayer()
+  const switchLayer = useSwitchLayer()
   const { tenant } = useTenant()
 
   if (layer === 'admin') {
@@ -4374,12 +4750,29 @@ export default function App() {
   const [user, setUser] = useState<UserAccount | null>(null)
   const [orders, setOrders] = useState<TrackedOrder[]>(tenantOrders)
   const [isAuthOpen, setIsAuthOpen] = useState(false)
-  const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false)
-  const [isSellerLoginOpen, setIsSellerLoginOpen] = useState(false)
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const [isAccountOpen, setIsAccountOpen] = useState(false)
   const [isAboutOpen, setIsAboutOpen] = useState(false)
   const [isContactOpen, setIsContactOpen] = useState(false)
+  const [isComplianceOpen, setIsComplianceOpen] = useState(false)
+  const [complianceDoc, setComplianceDoc] = useState<ComplianceDocType>('gdpr')
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+
+  // URL Reset Token Detection for Store Owners
+  const [resetToken, setResetToken] = useState<string | null>(null)
+  const [resetSlug, setResetSlug] = useState<string | null>(null)
+  const [isResetOpen, setIsResetOpen] = useState(false)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('reset_token')
+    const slug = params.get('slug')
+    if (token) {
+      setResetToken(token)
+      setResetSlug(slug || activeTenant.slug)
+      setIsResetOpen(true)
+    }
+  }, [activeTenant.slug])
 
   const [isCartOpen, setIsCartOpen] = useState(false)
   const [isWishlistOpen, setIsWishlistOpen] = useState(false)
@@ -4440,6 +4833,22 @@ export default function App() {
 
   const handleOrderPlaced = (newOrder: TrackedOrder) => {
     setOrders((prev) => [newOrder, ...prev])
+    mockStore.placeOrder(activeTenant.id, newOrder)
+    
+    // Log audit trail event
+    auditLogger.log({
+      tenantSlug: activeTenant.slug,
+      tenantName: activeTenant.brandName || activeTenant.name,
+      actorId: user?.email || 'customer_guest',
+      actorName: newOrder.shippingAddress?.name || 'Shopper',
+      actorRole: 'seller',
+      action: 'ORDER_PLACED',
+      category: 'orders',
+      severity: 'info',
+      details: `New order #${newOrder.id} placed for ${newOrder.items?.length || 1} items (Total: ₹${newOrder.total}). Payment: ${newOrder.paymentMethod}.`,
+      metadata: { orderId: newOrder.id, total: newOrder.total, itemsCount: newOrder.items?.length },
+    })
+
     if (!user) {
       setUser({
         name: newOrder.shippingAddress.name,
@@ -4543,6 +4952,8 @@ export default function App() {
       verified: true,
     }
     setReviews((prev) => [newRev, ...prev])
+    mockStore.submitReview(activeTenant.id, newRev)
+    showToast('Thank you! Your verified review has been published.')
   }
 
   const rawSubtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0)
@@ -4633,8 +5044,11 @@ export default function App() {
 
       <Footer
         tenant={activeTenant}
-        onOpenSellerLogin={() => setIsSellerLoginOpen(true)}
-        onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
+        onOpenLogin={() => setIsLoginModalOpen(true)}
+        onOpenComplianceDoc={(doc) => {
+          setComplianceDoc(doc)
+          setIsComplianceOpen(true)
+        }}
       />
 
       {/* Mobile Drawer Navigation */}
@@ -4694,11 +5108,16 @@ export default function App() {
         }}
       />
 
-      {/* Authentication Modal */}
+      {/* Authentication Modal (Integrated Shopper & Store Owner Portal) */}
       <AuthModal
+        tenant={activeTenant}
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         onLoginSuccess={handleLoginSuccess}
+        onSellerLoginSuccess={() => {
+          showToast(`Welcome back, ${activeTenant.name} Store Owner!`)
+          switchLayer('dashboard')
+        }}
       />
 
       {/* Account & Real-Time Order Tracking Drawer */}
@@ -4765,16 +5184,36 @@ export default function App() {
         </svg>
       </a>
 
-      {/* Super Admin Login Modal (Accessible with Super Admin Credentials) */}
-      <AdminLoginModal
-        isOpen={isAdminLoginOpen}
-        onClose={() => setIsAdminLoginOpen(false)}
+      {/* Unified Common Login Modal (Super Admin, Merchant, Staff) */}
+      <CommonLoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onSuccess={(session) => {
+          if (session?.role === 'super_admin') {
+            switchLayer('admin')
+          } else if (session?.tenantSlug) {
+            switchLayer('dashboard')
+          }
+        }}
       />
 
-      {/* Seller Portal Login Modal (Accessible with Seller Credentials) */}
-      <SellerLoginModal
-        isOpen={isSellerLoginOpen}
-        onClose={() => setIsSellerLoginOpen(false)}
+      {/* Password Reset Modal (opened via email link or URL reset_token) */}
+      <ResetPasswordModal
+        isOpen={isResetOpen}
+        resetToken={resetToken || undefined}
+        tenantSlug={resetSlug || undefined}
+        onClose={() => {
+          setIsResetOpen(false)
+          setResetToken(null)
+          setResetSlug(null)
+        }}
+      />
+
+      {/* Orvexa Tech Trust, GDPR, DPDP & Legal Compliance Modal */}
+      <LegalComplianceModal
+        isOpen={isComplianceOpen}
+        initialTab={complianceDoc}
+        onClose={() => setIsComplianceOpen(false)}
       />
 
       {/* Scroll to Top Button */}

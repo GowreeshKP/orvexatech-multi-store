@@ -3,9 +3,11 @@ import { useTenant, useSwitchLayer } from '@/context/TenantContext'
 import { useDashboardStats, useDashboardProducts, useTenantOrders, useThemeCustomizer } from '@/api/hooks'
 import { authService, type SellerSession } from '@/api/auth'
 import { mockStore } from '@/api/mock-store'
+import { auditLogger } from '@/api/audit-logger'
 import SellerLogin from '@/components/auth/SellerLogin'
+import StoreAuditLogs from '@/components/store/StoreAuditLogs'
 import type { Product } from '@/types'
-import type { TenantConfig, ThemeConfig } from '@/types/tenant'
+import type { TenantConfig, ThemeConfig, TrackedOrder } from '@/types/tenant'
 
 // Dashboard sidebar navigation items
 const NAV_ITEMS = [
@@ -14,6 +16,7 @@ const NAV_ITEMS = [
   { id: 'orders', label: 'Orders & Shipments', icon: '📦' },
   { id: 'storefront', label: 'Storefront & Homepage', icon: '🎨' },
   { id: 'database', label: 'Database & MongoDB', icon: '🗄️' },
+  { id: 'audit', label: 'Security & Audit Log', icon: '🛡️' },
   { id: 'settings', label: 'Store Settings & Plan', icon: '⚙️' },
 ] as const
 
@@ -302,6 +305,7 @@ export default function DashboardApp() {
           {activeView === 'orders' && <OrderManager onToast={showToast} />}
           {activeView === 'storefront' && <StorefrontCustomizer onToast={showToast} />}
           {activeView === 'database' && <DatabaseManager onToast={showToast} />}
+          {activeView === 'audit' && tenant && <StoreAuditLogs tenant={tenant} onToast={showToast} />}
           {activeView === 'settings' && <StoreSettings onNavigate={(view) => setActiveView(view)} onToast={showToast} />}
         </div>
       </main>
@@ -2115,22 +2119,79 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
 // 4. Order Manager & Real-Time Tracking
 // =====================================================
 function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
-  const { orders } = useTenantOrders()
+  const { tenant } = useTenant()
+  const { orders, updateOrderStatus } = useTenantOrders()
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [searchOrder, setSearchOrder] = useState('')
+  const [selectedOrder, setSelectedOrder] = useState<TrackedOrder | null>(null)
 
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
       const matchesStatus = filterStatus === 'all' || o.status.toLowerCase() === filterStatus.toLowerCase()
       const custName = o.shippingAddress?.name || ''
       const custCity = o.shippingAddress?.city || ''
+      const custPhone = o.shippingAddress?.phone || ''
       const matchesSearch =
         o.id.toLowerCase().includes(searchOrder.toLowerCase()) ||
         custName.toLowerCase().includes(searchOrder.toLowerCase()) ||
-        custCity.toLowerCase().includes(searchOrder.toLowerCase())
+        custCity.toLowerCase().includes(searchOrder.toLowerCase()) ||
+        custPhone.includes(searchOrder)
       return matchesStatus && matchesSearch
     })
   }, [orders, filterStatus, searchOrder])
+
+  const handleStatusChange = (orderId: string, newStatus: TrackedOrder['status']) => {
+    updateOrderStatus(orderId, newStatus)
+    if (tenant) {
+      auditLogger.log({
+        tenantSlug: tenant.slug,
+        tenantName: tenant.brandName,
+        actorId: 'seller_session',
+        actorName: tenant.ownerName || 'Store Owner',
+        actorRole: 'seller',
+        action: 'ORDER_STATUS_UPDATED',
+        category: 'orders',
+        severity: 'info',
+        details: `Order #${orderId} status updated to "${newStatus}".`,
+        metadata: { orderId, newStatus },
+      })
+    }
+    onToast(`Order #${orderId} status updated to "${newStatus}"!`)
+    if (selectedOrder && selectedOrder.id === orderId) {
+      setSelectedOrder((prev: TrackedOrder | null) => (prev ? { ...prev, status: newStatus } : null))
+    }
+  }
+
+  const handleExportCsv = () => {
+    if (filteredOrders.length === 0) {
+      onToast('No orders to export.')
+      return
+    }
+    const headers = ['Order ID', 'Date', 'Customer Name', 'Phone', 'City', 'State', 'Pincode', 'Items Count', 'Total', 'Payment Method', 'Status', 'Courier AWB']
+    const rows = filteredOrders.map((o) => [
+      `"${o.id}"`,
+      `"${o.date}"`,
+      `"${o.shippingAddress?.name || ''}"`,
+      `"${o.shippingAddress?.phone || ''}"`,
+      `"${o.shippingAddress?.city || ''}"`,
+      `"${o.shippingAddress?.state || ''}"`,
+      `"${o.shippingAddress?.pincode || ''}"`,
+      o.items?.length || 0,
+      o.total,
+      `"${o.paymentMethod || 'Prepaid'}"`,
+      `"${o.status}"`,
+      `"${o.awb || ''}"`,
+    ])
+    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.setAttribute('download', `${tenant?.slug || 'store'}-orders-${new Date().toISOString().split('T')[0]}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    onToast(`Exported ${filteredOrders.length} orders to CSV!`)
+  }
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -2138,8 +2199,18 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
         <div>
           <h2 className="text-lg font-bold text-black">Customer Orders & Shipments</h2>
           <p className="text-xs text-black/50 mt-0.5">
-            {orders.length} total orders recorded • Manage fulfillment, courier tracking, and customer details.
+            {orders.length} total orders recorded • Manage fulfillment, status transitions, and customer deliveries.
           </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportCsv}
+            className="bg-stone-900 hover:bg-black text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+          >
+            <span>📥</span>
+            <span>Export Orders CSV</span>
+          </button>
         </div>
       </div>
 
@@ -2150,10 +2221,18 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
             type="text"
             value={searchOrder}
             onChange={(e) => setSearchOrder(e.target.value)}
-            placeholder="Search by Order ID, Customer Name, or City..."
+            placeholder="Search by Order ID, Customer Name, Phone, or City..."
             className="w-full bg-white border border-black/15 px-4 py-2.5 pl-9 text-xs rounded-lg outline-none focus:border-black"
           />
           <span className="absolute left-3 top-2.5 text-black/40 text-xs">🔍</span>
+          {searchOrder && (
+            <button
+              onClick={() => setSearchOrder('')}
+              className="absolute right-3 top-2.5 text-black/40 hover:text-black text-xs"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         <select
@@ -2161,11 +2240,11 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
           onChange={(e) => setFilterStatus(e.target.value)}
           className="bg-white border border-black/15 px-4 py-2.5 text-xs font-bold uppercase rounded-lg outline-none cursor-pointer focus:border-black"
         >
-          <option value="all">ALL STATUSES</option>
+          <option value="all">ALL STATUSES ({orders.length})</option>
+          <option value="Processing">PROCESSING</option>
           <option value="In Transit">IN TRANSIT</option>
           <option value="Out for Delivery">OUT FOR DELIVERY</option>
           <option value="Delivered">DELIVERED</option>
-          <option value="Processing">PROCESSING</option>
         </select>
       </div>
 
@@ -2182,12 +2261,13 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-black/10 bg-stone-50 text-[10px] font-bold tracking-widest uppercase text-black/50">
-                  <th className="px-6 py-3.5">Order ID</th>
-                  <th className="px-4 py-3.5">Customer & Shipping City</th>
+                  <th className="px-6 py-3.5">Order ID & Date</th>
+                  <th className="px-4 py-3.5">Customer & Destination</th>
                   <th className="px-4 py-3.5">Items Ordered</th>
-                  <th className="px-4 py-3.5">Order Date</th>
-                  <th className="px-4 py-3.5">Status</th>
-                  <th className="px-6 py-3.5 text-right">Total Amount</th>
+                  <th className="px-4 py-3.5">Payment</th>
+                  <th className="px-4 py-3.5">Fulfillment Status</th>
+                  <th className="px-4 py-3.5">Total Amount</th>
+                  <th className="px-6 py-3.5 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-black/5 text-xs">
@@ -2196,34 +2276,67 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
                   const custCityState = [order.shippingAddress?.city, order.shippingAddress?.state].filter(Boolean).join(', ')
                   return (
                     <tr key={order.id} className="hover:bg-stone-50/70 transition-colors">
-                      <td className="px-6 py-4 font-mono font-bold text-black">{order.id}</td>
+                      <td className="px-6 py-4">
+                        <span className="font-mono font-bold text-black block">{order.id}</span>
+                        <span className="text-[10px] text-black/40">{order.date}</span>
+                      </td>
+
                       <td className="px-4 py-4">
                         <p className="font-bold text-black">{custName}</p>
                         {custCityState && <p className="text-[11px] text-black/50">{custCityState}</p>}
+                        {order.shippingAddress?.phone && (
+                          <p className="text-[10px] font-mono text-black/40">{order.shippingAddress.phone}</p>
+                        )}
                       </td>
+
                       <td className="px-4 py-4">
                         {order.items?.map((item: any, idx: number) => {
                           const itemName = item.name || item.product?.name || 'Product'
                           const itemSize = item.size || item.selectedSize || ''
                           return (
-                            <p key={idx} className="truncate max-w-xs text-[11px]">
-                              {item.quantity}x {itemName} {itemSize ? `(${itemSize})` : ''}
+                            <p key={idx} className="truncate max-w-xs text-[11px] text-black/80">
+                              <span className="font-bold">{item.quantity}x</span> {itemName} {itemSize ? `(${itemSize})` : ''}
                             </p>
                           )
                         })}
                       </td>
-                      <td className="px-4 py-4 text-black/60">{order.date}</td>
+
                       <td className="px-4 py-4">
-                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${
-                          order.status === 'Delivered' ? 'bg-emerald-50 text-emerald-700' :
-                          order.status === 'In Transit' ? 'bg-blue-50 text-blue-700' :
-                          order.status === 'Out for Delivery' ? 'bg-purple-50 text-purple-700' :
-                          'bg-amber-50 text-amber-700'
-                        }`}>
-                          {order.status}
-                        </span>
+                        <span className="text-[11px] font-medium text-black/70 block">{order.paymentMethod || 'Prepaid'}</span>
+                        <span className="text-[9px] font-mono text-emerald-600 font-bold uppercase">PAID</span>
                       </td>
-                      <td className="px-6 py-4 font-bold text-right text-sm">₹{order.total.toLocaleString()}</td>
+
+                      <td className="px-4 py-4">
+                        <select
+                          value={order.status}
+                          onChange={(e) => handleStatusChange(order.id, e.target.value as TrackedOrder['status'])}
+                          className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-lg border outline-none cursor-pointer ${
+                            order.status === 'Delivered'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                              : order.status === 'In Transit'
+                              ? 'bg-blue-50 text-blue-800 border-blue-300'
+                              : order.status === 'Out for Delivery'
+                              ? 'bg-purple-50 text-purple-800 border-purple-300'
+                              : 'bg-amber-50 text-amber-800 border-amber-300'
+                          }`}
+                        >
+                          <option value="Processing">Processing</option>
+                          <option value="In Transit">In Transit</option>
+                          <option value="Out for Delivery">Out for Delivery</option>
+                          <option value="Delivered">Delivered</option>
+                        </select>
+                      </td>
+
+                      <td className="px-4 py-4 font-bold text-sm text-black">₹{order.total.toLocaleString()}</td>
+
+                      <td className="px-6 py-4 text-right">
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="px-3 py-1.5 text-xs font-bold bg-stone-100 hover:bg-black hover:text-white rounded-lg border border-black/10 transition-colors cursor-pointer"
+                        >
+                          👁️ View
+                        </button>
+                      </td>
                     </tr>
                   )
                 })}
@@ -2232,6 +2345,102 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
           </div>
         )}
       </div>
+
+      {/* Order Details Modal */}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white max-w-xl w-full rounded-2xl border border-black/10 shadow-2xl overflow-hidden animate-slide-down">
+            <div className="bg-stone-900 text-white p-6 flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-widest block">ORDER DETAILS</span>
+                <h3 className="text-base font-bold font-mono">{selectedOrder.id}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedOrder(null)}
+                className="text-white/60 hover:text-white text-xl cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 text-xs max-h-[80vh] overflow-y-auto">
+              {/* Status Update Strip */}
+              <div className="flex items-center justify-between p-3.5 bg-stone-50 rounded-xl border border-black/10">
+                <div>
+                  <span className="text-[10px] text-black/50 font-bold uppercase block">Current Fulfillment Status</span>
+                  <span className="text-xs font-bold text-black">{selectedOrder.status}</span>
+                </div>
+                <select
+                  value={selectedOrder.status}
+                  onChange={(e) => handleStatusChange(selectedOrder.id, e.target.value as TrackedOrder['status'])}
+                  className="bg-white border border-black/20 text-xs font-bold uppercase rounded-lg px-3 py-1.5 cursor-pointer outline-none"
+                >
+                  <option value="Processing">Processing</option>
+                  <option value="In Transit">In Transit</option>
+                  <option value="Out for Delivery">Out for Delivery</option>
+                  <option value="Delivered">Delivered</option>
+                </select>
+              </div>
+
+              {/* Shipping Address */}
+              <div className="border border-black/10 p-4 rounded-xl space-y-1">
+                <p className="font-bold uppercase tracking-wider text-black text-[10px]">Shipping Address</p>
+                <p className="font-bold text-black">{selectedOrder.shippingAddress?.name}</p>
+                <p className="text-black/70">{selectedOrder.shippingAddress?.address}</p>
+                <p className="text-black/70">{selectedOrder.shippingAddress?.city}, {selectedOrder.shippingAddress?.state} - {selectedOrder.shippingAddress?.pincode}</p>
+                <p className="text-black/70 font-mono">Phone: {selectedOrder.shippingAddress?.phone}</p>
+              </div>
+
+              {/* Items List */}
+              <div className="border border-black/10 p-4 rounded-xl space-y-2">
+                <p className="font-bold uppercase tracking-wider text-black text-[10px]">Ordered Items ({selectedOrder.items?.length || 0})</p>
+                <div className="divide-y divide-black/5">
+                  {selectedOrder.items?.map((item: any, i: number) => (
+                    <div key={i} className="py-2 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {item.image && (
+                          <img src={item.image} alt="" className="w-10 h-12 object-cover rounded bg-stone-100" />
+                        )}
+                        <div>
+                          <p className="font-bold text-black">{item.name}</p>
+                          <p className="text-[10px] text-black/50">
+                            Size: {item.size || 'M'} • Qty: {item.quantity}
+                            {item.lining && ` • ${item.lining}`}
+                            {item.zip && ` • ${item.zip}`}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="font-bold text-black">₹{(item.price * item.quantity).toLocaleString()}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-2 border-t border-black/10 flex justify-between font-bold text-sm">
+                  <span>Total Amount</span>
+                  <span>₹{selectedOrder.total.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Courier & Tracking */}
+              <div className="border border-black/10 p-4 rounded-xl space-y-1 text-[11px]">
+                <p className="font-bold uppercase tracking-wider text-black text-[10px]">Courier & Tracking AWB</p>
+                <p className="text-black/70">Courier: <strong>{selectedOrder.courier || 'Blue Dart Express'}</strong></p>
+                <p className="text-black/70 font-mono">AWB Code: <strong>{selectedOrder.awb || 'BD492810482IN'}</strong></p>
+                <p className="text-black/70">Payment: <strong>{selectedOrder.paymentMethod}</strong></p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-stone-50 border-t border-black/10 flex justify-end">
+              <button
+                onClick={() => setSelectedOrder(null)}
+                className="bg-black text-white text-xs font-bold uppercase px-5 py-2.5 rounded-lg cursor-pointer hover:bg-stone-800"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -2250,7 +2459,190 @@ function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardV
   const [isSavingLogo, setIsSavingLogo] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
 
+  // Profile & Authentication State
+  const [ownerName, setOwnerName] = useState(tenant?.ownerName || '')
+  const [ownerEmail, setOwnerEmail] = useState(tenant?.ownerEmail || '')
+  const [ownerPhone, setOwnerPhone] = useState(tenant?.ownerPhone || '')
+  const [isSavingProfile, setIsSavingProfile] = useState(false)
+
+  // Password Change State
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showCurrentPass, setShowCurrentPass] = useState(false)
+  const [showNewPass, setShowNewPass] = useState(false)
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
+  const [passError, setPassError] = useState<string | null>(null)
+  const [passSuccess, setPassSuccess] = useState<string | null>(null)
+
+  // Staff Management State
+  const [staffList, setStaffList] = useState<Array<{ id: string; name: string; email: string; role: string }>>([])
+  const [staffName, setStaffName] = useState('')
+  const [staffEmail, setStaffEmail] = useState('')
+  const [staffRole, setStaffRole] = useState<'staff' | 'manager'>('staff')
+  const [staffPassword, setStaffPassword] = useState('')
+  const [isAddingStaff, setIsAddingStaff] = useState(false)
+  const [staffMsg, setStaffMsg] = useState<string | null>(null)
+
+  // Active sub-tab inside credentials
+  const [authSubTab, setAuthSubTab] = useState<'password' | 'profile' | 'staff' | 'pass' | 'audit'>('password')
+
+  useEffect(() => {
+    if (tenant) {
+      setOwnerName(tenant.ownerName || '')
+      setOwnerEmail(tenant.ownerEmail || '')
+      setOwnerPhone(tenant.ownerPhone || '')
+
+      // Fetch staff from backend API if available
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+      fetch(`${API_BASE}/admin/tenants/${tenant.slug}/staff`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.staff) setStaffList(data.staff)
+        })
+        .catch(() => {})
+    }
+  }, [tenant])
+
   if (!tenant) return null
+
+  // Password strength calculation
+  const getPasswordStrength = (pass: string) => {
+    if (!pass) return { score: 0, label: 'None', color: 'bg-stone-200' }
+    let score = 0
+    if (pass.length >= 6) score += 1
+    if (pass.length >= 8) score += 1
+    if (/[A-Z]/.test(pass)) score += 1
+    if (/[0-9]/.test(pass)) score += 1
+    if (/[^A-Za-z0-9]/.test(pass)) score += 1
+
+    if (score <= 2) return { score, label: 'Weak', color: 'bg-rose-500', text: 'text-rose-600' }
+    if (score <= 3) return { score, label: 'Medium', color: 'bg-amber-500', text: 'text-amber-600' }
+    return { score, label: 'Strong', color: 'bg-emerald-500', text: 'text-emerald-600' }
+  }
+
+  const passStrength = getPasswordStrength(newPassword)
+
+  // Handle saving profile changes (Name, Email, Phone)
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSavingProfile(true)
+
+    mockStore.updateTenant(tenant.id, {
+      ownerName: ownerName.trim(),
+      ownerEmail: ownerEmail.trim().toLowerCase(),
+      ownerPhone: ownerPhone.trim(),
+    })
+
+    // Also notify authService credentials map
+    await authService.changeSellerPassword(tenant.slug, {
+      newPassword: authService.getStoreCredential(tenant.slug).password,
+      newEmail: ownerEmail.trim().toLowerCase(),
+      ownerName: ownerName.trim(),
+    })
+
+    refreshTenant()
+    setIsSavingProfile(false)
+    onToast('✅ Account credentials and profile details updated!')
+  }
+
+  // Handle changing password
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPassError(null)
+    setPassSuccess(null)
+
+    if (newPassword.length < 6) {
+      setPassError('New password must be at least 6 characters.')
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPassError('New passwords do not match.')
+      return
+    }
+
+    setIsChangingPassword(true)
+
+    const res = await authService.changeSellerPassword(tenant.slug, {
+      currentPassword: currentPassword.trim() || undefined,
+      newPassword: newPassword.trim(),
+      newEmail: ownerEmail.trim().toLowerCase(),
+      ownerName: ownerName.trim(),
+    })
+
+    setIsChangingPassword(false)
+
+    if (res.success) {
+      setPassSuccess(res.message)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      onToast('🔑 Password changed successfully! Use your new password on next sign in.')
+    } else {
+      setPassError(res.message || 'Failed to update password. Please check your current password.')
+    }
+  }
+
+  // Handle staff creation
+  const handleCreateStaff = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!staffName || !staffEmail || !staffPassword) return
+
+    setIsAddingStaff(true)
+    setStaffMsg(null)
+
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+    try {
+      const res = await fetch(`${API_BASE}/admin/tenants/${tenant.slug}/staff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: staffName,
+          email: staffEmail,
+          password: staffPassword,
+          role: staffRole,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok && data.staff) {
+        setStaffList((prev) => [...prev, data.staff])
+        setStaffName('')
+        setStaffEmail('')
+        setStaffPassword('')
+        setStaffMsg(`✅ Staff member ${data.staff.name} added.`)
+        onToast(`Staff account created for ${data.staff.name}!`)
+      } else {
+        setStaffMsg(data.error || 'Could not add staff member.')
+      }
+    } catch {
+      const newStaff = {
+        id: `staff_${Date.now()}`,
+        name: staffName,
+        email: staffEmail,
+        role: staffRole,
+      }
+      setStaffList((prev) => [...prev, newStaff])
+      setStaffName('')
+      setStaffEmail('')
+      setStaffPassword('')
+      setStaffMsg(`✅ Staff account registered for ${staffName}.`)
+      onToast(`Staff account created for ${staffName}!`)
+    } finally {
+      setIsAddingStaff(false)
+    }
+  }
+
+  const handleDeleteStaff = async (staffId: string) => {
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+    try {
+      await fetch(`${API_BASE}/admin/tenants/${tenant.slug}/staff/${staffId}`, {
+        method: 'DELETE',
+      })
+    } catch {}
+    setStaffList((prev) => prev.filter((s) => s.id !== staffId))
+    onToast('Staff member access removed.')
+  }
 
   // Handle file upload — converts to base64 DataURL
   const handleFileUpload = (file: File) => {
@@ -2316,10 +2708,475 @@ function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardV
 
   const currentLogo = isUploadMode ? logoPreview : logoUrl
 
+  const currentEffectivePassword = authService.getStoreCredential(tenant.slug).password
+
+  const copyAccessPass = () => {
+    const text = `================================================
+🏢 STORE OWNER ACCESS PASS — ${tenant.brandName.toUpperCase()}
+================================================
+Merchant Dashboard: ${window.location.origin}/?dashboard&tenant=${tenant.slug}
+Customer Storefront: ${window.location.origin}/?tenant=${tenant.slug}
+
+🔑 CREDENTIALS:
+Login ID / Email: ${tenant.ownerEmail}
+Login Username: ${tenant.slug}
+Current Password: ${currentEffectivePassword}
+Owner: ${tenant.ownerName}
+Isolated Database: orvexa_tenant_${tenant.slug}
+================================================`
+    navigator.clipboard.writeText(text)
+    onToast('📋 Merchant access pass copied to clipboard!')
+  }
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
 
-      {/* ── BRAND IDENTITY & LOGO ── */}
+      {/* ── 1. AUTHENTICATION & LOGIN CREDENTIALS PANEL (PRIMARY) ── */}
+      <div className="bg-white rounded-xl border border-black/8 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-black/8 bg-stone-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center text-lg">
+              🔐
+            </div>
+            <div>
+              <h3 className="text-sm font-bold tracking-wider uppercase text-white">
+                Store Authentication & Login Credentials
+              </h3>
+              <p className="text-[11px] text-white/50 mt-0.5">
+                Set and update your store owner password, login email, and staff access accounts.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={copyAccessPass}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/20 transition-all cursor-pointer flex items-center gap-1.5 self-start sm:self-auto"
+          >
+            <span>📋</span>
+            <span>Copy Access Pass</span>
+          </button>
+        </div>
+
+        {/* Sub Navigation */}
+        <div className="flex border-b border-black/8 px-6 bg-stone-50/60 text-xs font-bold overflow-x-auto">
+          <button
+            onClick={() => setAuthSubTab('password')}
+            className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+              authSubTab === 'password'
+                ? 'border-black text-black'
+                : 'border-transparent text-black/40 hover:text-black'
+            }`}
+          >
+            <span>🔑</span>
+            <span>Change Store Password</span>
+          </button>
+
+          <button
+            onClick={() => setAuthSubTab('profile')}
+            className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+              authSubTab === 'profile'
+                ? 'border-black text-black'
+                : 'border-transparent text-black/40 hover:text-black'
+            }`}
+          >
+            <span>✉️</span>
+            <span>Login Email & Profile</span>
+          </button>
+
+          <button
+            onClick={() => setAuthSubTab('staff')}
+            className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+              authSubTab === 'staff'
+                ? 'border-black text-black'
+                : 'border-transparent text-black/40 hover:text-black'
+            }`}
+          >
+            <span>👥</span>
+            <span>Staff Operator Logins ({staffList.length})</span>
+          </button>
+
+          <button
+            onClick={() => setAuthSubTab('pass')}
+            className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+              authSubTab === 'pass'
+                ? 'border-black text-black'
+                : 'border-transparent text-black/40 hover:text-black'
+            }`}
+          >
+            <span>🎫</span>
+            <span>Quick Login Info</span>
+          </button>
+
+          <button
+            onClick={() => setAuthSubTab('audit')}
+            className={`py-3 px-3.5 border-b-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
+              authSubTab === 'audit'
+                ? 'border-black text-black'
+                : 'border-transparent text-black/40 hover:text-black'
+            }`}
+          >
+            <span>🛡️</span>
+            <span>Security Audit Trail</span>
+          </button>
+        </div>
+
+        <div className="p-6">
+          {/* TAB: CHANGE PASSWORD */}
+          {authSubTab === 'password' && (
+            <form onSubmit={handleChangePassword} className="space-y-5 max-w-xl">
+              {passError && (
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                  <span>⚠️</span>
+                  <span>{passError}</span>
+                </div>
+              )}
+
+              {passSuccess && (
+                <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                  <span>✅</span>
+                  <span>{passSuccess}</span>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-black">
+                    Current Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPass(!showCurrentPass)}
+                    className="text-[11px] text-black/50 hover:text-black font-semibold cursor-pointer"
+                  >
+                    {showCurrentPass ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <input
+                  type={showCurrentPass ? 'text' : 'password'}
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Enter current password (if set)"
+                  className="w-full bg-stone-50 border border-black/15 focus:border-black rounded-xl px-4 py-2.5 text-xs text-black outline-none transition-all font-mono"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-black">
+                    New Store Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPass(!showNewPass)}
+                    className="text-[11px] text-black/50 hover:text-black font-semibold cursor-pointer"
+                  >
+                    {showNewPass ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <input
+                  type={showNewPass ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  placeholder="Enter new password (min 6 chars)"
+                  className="w-full bg-stone-50 border border-black/15 focus:border-black rounded-xl px-4 py-2.5 text-xs text-black outline-none transition-all font-mono"
+                />
+
+                {/* Password Strength Meter */}
+                {newPassword && (
+                  <div className="pt-1.5 space-y-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-black/50">Password Strength:</span>
+                      <span className={`font-bold ${passStrength.text}`}>{passStrength.label}</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-stone-100 rounded-full overflow-hidden flex gap-1">
+                      {[1, 2, 3, 4, 5].map((step) => (
+                        <div
+                          key={step}
+                          className={`h-full flex-1 rounded-full transition-all ${
+                            step <= passStrength.score ? passStrength.color : 'bg-stone-200'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-black">
+                  Confirm New Password
+                </label>
+                <input
+                  type={showNewPass ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  placeholder="Re-type new password"
+                  className="w-full bg-stone-50 border border-black/15 focus:border-black rounded-xl px-4 py-2.5 text-xs text-black outline-none transition-all font-mono"
+                />
+                {confirmPassword && confirmPassword !== newPassword && (
+                  <p className="text-[11px] text-rose-500 font-semibold">Passwords do not match</p>
+                )}
+                {confirmPassword && confirmPassword === newPassword && (
+                  <p className="text-[11px] text-emerald-600 font-semibold">✓ Passwords match</p>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                disabled={isChangingPassword || !newPassword || newPassword !== confirmPassword}
+                className="bg-black hover:bg-stone-800 text-white font-bold text-xs uppercase tracking-widest px-6 py-3 rounded-xl transition-all cursor-pointer disabled:opacity-40 flex items-center gap-2 shadow-sm"
+              >
+                {isChangingPassword ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Updating Password...</span>
+                  </>
+                ) : (
+                  <span>💾 Update Store Password</span>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* TAB: PROFILE & EMAIL */}
+          {authSubTab === 'profile' && (
+            <form onSubmit={handleSaveProfile} className="space-y-5 max-w-xl">
+              <div className="bg-stone-50 rounded-xl p-4 border border-black/8 flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-mono text-black/40 uppercase font-bold">Assigned Subdomain Username</p>
+                  <code className="text-xs font-mono font-bold text-indigo-700">{tenant.slug}</code>
+                </div>
+                <span className="text-[11px] bg-stone-200/80 px-2.5 py-1 rounded text-black/60 font-mono">
+                  {tenant.slug}.orvexatech.com
+                </span>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-black">
+                  Store Owner Full Name
+                </label>
+                <input
+                  type="text"
+                  value={ownerName}
+                  onChange={(e) => setOwnerName(e.target.value)}
+                  required
+                  placeholder="e.g. Gowreesh KP"
+                  className="w-full bg-stone-50 border border-black/15 focus:border-black rounded-xl px-4 py-2.5 text-xs text-black outline-none transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-black">
+                  Primary Login Email / Notification Address
+                </label>
+                <input
+                  type="email"
+                  value={ownerEmail}
+                  onChange={(e) => setOwnerEmail(e.target.value)}
+                  required
+                  placeholder="e.g. owner@store.com"
+                  className="w-full bg-stone-50 border border-black/15 focus:border-black rounded-xl px-4 py-2.5 text-xs text-black outline-none transition-all font-mono"
+                />
+                <p className="text-[11px] text-black/50">
+                  This email is used to log into the Merchant Portal and receive order fulfillment notifications.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-black">
+                  Owner Phone / WhatsApp Contact
+                </label>
+                <input
+                  type="text"
+                  value={ownerPhone}
+                  onChange={(e) => setOwnerPhone(e.target.value)}
+                  placeholder="e.g. +91 98765 43210"
+                  className="w-full bg-stone-50 border border-black/15 focus:border-black rounded-xl px-4 py-2.5 text-xs text-black outline-none transition-all font-mono"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSavingProfile}
+                className="bg-black hover:bg-stone-800 text-white font-bold text-xs uppercase tracking-widest px-6 py-3 rounded-xl transition-all cursor-pointer disabled:opacity-40 flex items-center gap-2 shadow-sm"
+              >
+                {isSavingProfile ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <span>💾 Save Account Profile</span>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* TAB: STAFF OPERATOR LOGINS */}
+          {authSubTab === 'staff' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-black">
+                    Staff Operator Sub-Accounts
+                  </h4>
+                  <p className="text-[11px] text-black/50">
+                    Grant team members access to catalog and order fulfillment without sharing your master store password.
+                  </p>
+                </div>
+              </div>
+
+              {staffMsg && (
+                <div className="p-3 bg-stone-50 rounded-xl border border-black/10 text-xs font-mono">
+                  {staffMsg}
+                </div>
+              )}
+
+              {/* Add Staff Form */}
+              <form onSubmit={handleCreateStaff} className="bg-stone-50 rounded-xl p-4 border border-black/10 space-y-3">
+                <p className="text-xs font-bold uppercase tracking-wider text-black">+ Add New Team Member</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    value={staffName}
+                    onChange={(e) => setStaffName(e.target.value)}
+                    required
+                    placeholder="Staff Full Name"
+                    className="bg-white border border-black/15 rounded-lg px-3 py-2 text-xs text-black outline-none focus:border-black"
+                  />
+                  <input
+                    type="email"
+                    value={staffEmail}
+                    onChange={(e) => setStaffEmail(e.target.value)}
+                    required
+                    placeholder="Staff Email"
+                    className="bg-white border border-black/15 rounded-lg px-3 py-2 text-xs text-black outline-none focus:border-black font-mono"
+                  />
+                  <select
+                    value={staffRole}
+                    onChange={(e) => setStaffRole(e.target.value as 'staff' | 'manager')}
+                    className="bg-white border border-black/15 rounded-lg px-3 py-2 text-xs text-black outline-none focus:border-black"
+                  >
+                    <option value="staff">Role: Fulfillment Staff (Orders & Products)</option>
+                    <option value="manager">Role: Store Manager (Full Dashboard)</option>
+                  </select>
+                  <input
+                    type="password"
+                    value={staffPassword}
+                    onChange={(e) => setStaffPassword(e.target.value)}
+                    required
+                    placeholder="Staff Password (min 8 chars)"
+                    className="bg-white border border-black/15 rounded-lg px-3 py-2 text-xs text-black outline-none focus:border-black font-mono"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isAddingStaff}
+                  className="bg-stone-900 hover:bg-black text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer transition-colors"
+                >
+                  {isAddingStaff ? 'Adding...' : '+ Add Staff Account'}
+                </button>
+              </form>
+
+              {/* Staff Table */}
+              <div className="border border-black/10 rounded-xl overflow-hidden">
+                {staffList.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-black/40">
+                    No staff members added yet. Add team members above to grant sub-account access.
+                  </div>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-black/10 bg-stone-50 text-black/60 uppercase font-mono text-[10px]">
+                        <th className="text-left px-4 py-2.5">Name</th>
+                        <th className="text-left px-4 py-2.5">Email</th>
+                        <th className="text-left px-4 py-2.5">Role</th>
+                        <th className="text-right px-4 py-2.5">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/5">
+                      {staffList.map((s) => (
+                        <tr key={s.id} className="hover:bg-stone-50">
+                          <td className="px-4 py-2.5 font-bold">{s.name}</td>
+                          <td className="px-4 py-2.5 font-mono text-black/60">{s.email}</td>
+                          <td className="px-4 py-2.5">
+                            <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-bold uppercase border border-indigo-200">
+                              {s.role}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteStaff(s.id)}
+                              className="text-rose-600 hover:text-rose-800 text-xs font-semibold cursor-pointer"
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: QUICK ACCESS PASS */}
+          {authSubTab === 'pass' && (
+            <div className="space-y-4">
+              <div className="bg-stone-900 text-white rounded-xl p-5 border border-black/10 space-y-3 font-mono text-xs shadow-inner">
+                <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                  <span className="font-bold text-amber-400">MERCHANT ACCESS PASS</span>
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">
+                    ACTIVE
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+                  <div>
+                    <span className="text-white/40 block text-[10px]">STORE NAME</span>
+                    <span className="font-bold text-white">{tenant.brandName}</span>
+                  </div>
+                  <div>
+                    <span className="text-white/40 block text-[10px]">USERNAME / SLUG</span>
+                    <span className="font-bold text-amber-300">{tenant.slug}</span>
+                  </div>
+                  <div>
+                    <span className="text-white/40 block text-[10px]">LOGIN EMAIL</span>
+                    <span className="font-bold text-white">{tenant.ownerEmail}</span>
+                  </div>
+                  <div>
+                    <span className="text-white/40 block text-[10px]">ACTIVE PASSWORD</span>
+                    <span className="font-bold text-emerald-400">{currentEffectivePassword}</span>
+                  </div>
+                </div>
+
+                <div className="pt-2.5 border-t border-white/10 flex items-center justify-between text-[10px] text-white/50">
+                  <span>Database: <code className="text-emerald-300">orvexa_tenant_{tenant.slug}</code></span>
+                  <button
+                    onClick={copyAccessPass}
+                    className="text-white bg-white/20 hover:bg-white/30 px-2.5 py-1 rounded transition-colors font-sans font-bold cursor-pointer"
+                  >
+                    📋 Copy Pass
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: AUDIT LOGS */}
+          {authSubTab === 'audit' && (
+            <div className="pt-2">
+              <StoreAuditLogs tenant={tenant} onToast={onToast} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── 2. BRAND IDENTITY & LOGO ── */}
       <div className="bg-white rounded-xl border border-black/8 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-black/8 flex items-center gap-3">
           <span className="text-lg">🖼️</span>

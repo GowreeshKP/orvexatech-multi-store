@@ -1,8 +1,10 @@
 // --- Multi-Tenant SaaS Platform Types ---
+export type { TrackedOrder } from './index'
 
 export interface TenantConfig {
   id: string
   slug: string
+  customMongoUri?: string
   name?: string
   brandName: string
   tagline?: string

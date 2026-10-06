@@ -3,9 +3,10 @@
 // ultra-sharp Plus Jakarta Sans / Inter typography, interactive milestone journeys,
 // 1-Tap Indian UPI/Razorpay checkout, AI Magic copy assistant, live brand showcase, and transparent pricing.
 
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAdminApplications, usePlatformStats, useAdminTenants } from '@/api/hooks'
 import { mockStore } from '@/api/mock-store'
+import { LegalComplianceModal, ComplianceFooterLinks, type ComplianceDocType } from '../compliance/LegalComplianceModal'
 
 interface PlatformWebsiteProps {
   onOpenAdminLogin: () => void
@@ -22,6 +23,74 @@ export default function PlatformWebsite({
   const { tenants } = useAdminTenants()
   const { submitApplication } = useAdminApplications()
 
+  // ── Scroll-reveal IntersectionObserver ──
+  useEffect(() => {
+    const els = document.querySelectorAll('.orv-reveal, .orv-reveal-scale')
+    const io = new IntersectionObserver(
+      (entries) => entries.forEach((e) => { if (e.isIntersecting) { (e.target as HTMLElement).classList.add('orv-visible'); io.unobserve(e.target) } }),
+      { threshold: 0.12 }
+    )
+    els.forEach((el) => io.observe(el))
+    return () => io.disconnect()
+  }, [])
+
+  // ── Scroll progress bar + navbar shadow ──
+  useEffect(() => {
+    const bar = document.getElementById('orv-scroll-progress')
+    const header = document.getElementById('orv-main-header')
+    const onScroll = () => {
+      const scrollTop = window.scrollY
+      const docHeight = document.documentElement.scrollHeight - window.innerHeight
+      const pct = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0
+      if (bar) bar.style.width = `${pct}%`
+      if (header) {
+        if (scrollTop > 20) header.classList.add('orv-navbar-scrolled')
+        else header.classList.remove('orv-navbar-scrolled')
+      }
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // ── Social Proof Toast ──
+  const [toast, setToast] = useState<{ msg: string; sub: string } | null>(null)
+  const toastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    const toasts = [
+      { msg: 'Priya M. just signed up', sub: 'Fashion & Apparel • Mumbai' },
+      { msg: 'New store: Bloom & Sprout', sub: 'Baby & Kids • Bengaluru' },
+      { msg: 'Devika P. saved ₹1.8L/yr', sub: 'Migrated from Shopify' },
+      { msg: 'Arjun R. just launched', sub: 'Artisanal & Heritage • Delhi' },
+      { msg: 'Khadi Studio: 76% growth', sub: 'Powered by Orvexa Cloud' },
+    ]
+    let idx = 0
+    const show = () => {
+      setToast(toasts[idx % toasts.length])
+      idx++
+      toastRef.current = setTimeout(() => {
+        setToast(null)
+        toastRef.current = setTimeout(show, 6000)
+      }, 4000)
+    }
+    const initial = setTimeout(show, 5000)
+    return () => {
+      clearTimeout(initial)
+      if (toastRef.current) clearTimeout(toastRef.current)
+    }
+  }, [])
+
+  // ── Ripple factory ──
+  const addRipple = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    const btn = e.currentTarget
+    const rect = btn.getBoundingClientRect()
+    const size = Math.max(rect.width, rect.height)
+    const wave = document.createElement('span')
+    wave.className = 'orv-ripple-wave'
+    wave.style.cssText = `width:${size}px;height:${size}px;left:${e.clientX - rect.left - size / 2}px;top:${e.clientY - rect.top - size / 2}px`
+    btn.appendChild(wave)
+    wave.addEventListener('animationend', () => wave.remove())
+  }, [])
+
   // State Management
   const [heroEmail, setHeroEmail] = useState('')
   const [selectedPillar, setSelectedPillar] = useState<'start' | 'sell' | 'market' | 'manage'>('start')
@@ -30,11 +99,14 @@ export default function PlatformWebsite({
   const [activeFaq, setActiveFaq] = useState<number | null>(0)
   const [showApplyModal, setShowApplyModal] = useState(false)
   const [selectedBrandNiche, setSelectedBrandNiche] = useState<string>('all')
+  const [complianceModalOpen, setComplianceModalOpen] = useState(false)
+  const [complianceDoc, setComplianceDoc] = useState<ComplianceDocType>('gdpr')
 
-  // AI Magic Generator State
-  const [aiProductPrompt, setAiProductPrompt] = useState('Handcrafted Organic Linen Kurta in Indigo with Mandarin Collar')
-  const [aiGeneratedOutput, setAiGeneratedOutput] = useState<string | null>(null)
-  const [isAiGenerating, setIsAiGenerating] = useState(false)
+  const handleOpenCompliance = (doc: ComplianceDocType) => {
+    setComplianceDoc(doc)
+    setComplianceModalOpen(true)
+  }
+
 
   // Interactive Merchant Application Form
   const [appName, setAppName] = useState('')
@@ -49,15 +121,19 @@ export default function PlatformWebsite({
   const [formSuccess, setFormSuccess] = useState<string | null>(null)
   const [slugStatus, setSlugStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle')
 
-  // ROI Calculator
-  const [monthlySalesVolume, setMonthlySalesVolume] = useState(1200)
+  // ROI / Commission Savings Calculator
+  const [monthlySalesVolume, setMonthlySalesVolume] = useState(1500)
   const [averageOrderValue, setAverageOrderValue] = useState(1950)
 
   const monthlyGMV = monthlySalesVolume * averageOrderValue
-  const legacyPlatformFee = Math.round(monthlyGMV * 0.02 + 8200 + 4500)
+  const legacyCommissionCut = Math.round(monthlyGMV * 0.02)
+  const legacyBasePlan = 8200 // e.g. Shopify Advanced / Grow Tier
+  const legacyAppStack = 5800 // GST Invoicing, COD OTP Verification, WhatsApp Automation, Cart Recovery
+  const legacyPlatformFee = legacyCommissionCut + legacyBasePlan + legacyAppStack
   const orvexaFlatFee = 2499
   const monthlySavings = Math.max(0, legacyPlatformFee - orvexaFlatFee)
   const annualSavings = monthlySavings * 12
+  const threeYearSavings = annualSavings * 3
 
   // Slug availability check
   const handleSlugChange = (val: string) => {
@@ -111,16 +187,6 @@ export default function PlatformWebsite({
     }, 900)
   }
 
-  const handleAiGenerate = () => {
-    if (!aiProductPrompt) return
-    setIsAiGenerating(true)
-    setTimeout(() => {
-      setAiGeneratedOutput(
-        `Crafted from 100% sustainably harvested organic flax, this signature Indigo Linen Kurta seamlessly balances heritage Indian tailoring with breathable modern minimalism. Features authentic mother-of-pearl buttons, a reinforced mandarin collar, and hidden side seam pockets.`
-      )
-      setIsAiGenerating(false)
-    }, 800)
-  }
 
   // Live Brands Showcase
   const showcaseBrands = [
@@ -171,17 +237,33 @@ export default function PlatformWebsite({
 
   return (
     <div className="min-h-screen bg-[#ffffff] text-slate-900 font-sans antialiased selection:bg-blue-600 selection:text-white">
-      {/* Subtle Background Radial Gradient Mesh (Light Mode) */}
+      {/* Background Radial Gradient Mesh + Floating Particles */}
       <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-        <div className="absolute top-[-5%] left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-gradient-to-b from-blue-100/70 via-indigo-50/40 to-transparent blur-[120px] rounded-full" />
-        <div className="absolute top-[35%] -right-[100px] w-[500px] h-[500px] bg-emerald-100/40 blur-[130px] rounded-full" />
+        {/* Ambient glows */}
+        <div className="orv-glow-pulse absolute top-[-5%] left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-gradient-to-b from-blue-100/70 via-indigo-50/40 to-transparent blur-[120px] rounded-full" />
+        <div className="orv-glow-pulse absolute top-[35%] -right-[100px] w-[500px] h-[500px] bg-emerald-100/40 blur-[130px] rounded-full" style={{ animationDelay: '2s' }} />
+        <div className="orv-glow-pulse absolute bottom-[10%] left-[-80px] w-[400px] h-[400px] bg-indigo-100/30 blur-[110px] rounded-full" style={{ animationDelay: '4s' }} />
+        {/* Dot grid */}
         <div
           className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: `radial-gradient(#0f172a 1px, transparent 1px)`,
-            backgroundSize: '28px 28px',
-          }}
+          style={{ backgroundImage: `radial-gradient(#0f172a 1px, transparent 1px)`, backgroundSize: '28px 28px' }}
         />
+        {/* Floating particles */}
+        {[
+          { size: 6,  top: '12%', left: '8%',   color: 'bg-blue-400/40',   dur: '8s',  delay: '0s'   },
+          { size: 4,  top: '28%', left: '92%',  color: 'bg-indigo-400/30', dur: '11s', delay: '1.5s' },
+          { size: 8,  top: '55%', left: '5%',   color: 'bg-emerald-400/25',dur: '9s',  delay: '3s'   },
+          { size: 5,  top: '72%', left: '88%',  color: 'bg-blue-300/35',   dur: '13s', delay: '0.8s' },
+          { size: 10, top: '18%', left: '48%',  color: 'bg-indigo-300/20', dur: '7s',  delay: '2.2s' },
+          { size: 4,  top: '85%', left: '30%',  color: 'bg-blue-400/30',   dur: '10s', delay: '1s'   },
+          { size: 6,  top: '40%', left: '75%',  color: 'bg-emerald-300/25',dur: '12s', delay: '4s'   },
+        ].map((p, i) => (
+          <div
+            key={i}
+            className={`orv-particle ${p.color}`}
+            style={{ width: p.size * 4, height: p.size * 4, top: p.top, left: p.left, ['--dur' as string]: p.dur, ['--delay' as string]: p.delay }}
+          />
+        ))}
       </div>
 
       {/* Top Banner Ribbon */}
@@ -203,8 +285,25 @@ export default function PlatformWebsite({
         </div>
       </div>
 
+      {/* Scroll Progress Bar */}
+      <div id="orv-scroll-progress" />
+
+      {/* Social Proof Toast */}
+      {toast && (
+        <div
+          className="fixed bottom-6 left-6 z-50 orv-toast-enter flex items-center gap-3 bg-white border border-slate-200 rounded-2xl shadow-xl px-4 py-3 max-w-xs"
+          style={{ boxShadow: '0 12px 40px rgba(15,23,42,0.12)' }}
+        >
+          <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold text-sm shrink-0">✓</div>
+          <div>
+            <p className="text-xs font-bold text-slate-900">{toast.msg}</p>
+            <p className="text-[10px] text-slate-500 font-mono">{toast.sub}</p>
+          </div>
+        </div>
+      )}
+
       {/* Main Sticky Navbar */}
-      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-slate-200/80 transition-all">
+      <header id="orv-main-header" className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-slate-200/80 transition-all">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
           {/* Brand Logo */}
           <div className="flex items-center gap-8">
@@ -223,13 +322,25 @@ export default function PlatformWebsite({
             </a>
 
             {/* Desktop Navigation Links */}
-            <nav className="hidden lg:flex items-center gap-7 text-[13px] font-semibold text-slate-600">
-              <a href="#what-we-provide" className="hover:text-blue-600 transition-colors">What We Provide</a>
-              <a href="#journey" className="hover:text-blue-600 transition-colors">Platform Journey</a>
-              <a href="#checkout" className="hover:text-blue-600 transition-colors">1-Tap Checkout</a>
-              <a href="#ai-magic" className="hover:text-blue-600 transition-colors">AI Magic</a>
-              <a href="#showcase" className="hover:text-blue-600 transition-colors">Live Brands</a>
-              <a href="#pricing" className="hover:text-blue-600 transition-colors">Pricing (₹ INR)</a>
+            <nav className="hidden lg:flex items-center gap-5 text-[13px] font-semibold text-slate-600">
+              <a
+                href="#savings-calculator"
+                className="group relative px-3 py-1.5 rounded-full bg-blue-50/80 hover:bg-blue-100/80 border border-blue-200/80 text-blue-700 transition-all flex items-center gap-1.5 whitespace-nowrap shadow-xs hover:scale-105 active:scale-95"
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+                <span>Savings Calculator</span>
+                <span className="text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded ml-0.5">
+                  0% Cut
+                </span>
+              </a>
+              <a href="#what-we-provide" className="orv-link-underline hover:text-blue-600 transition-colors whitespace-nowrap">What We Provide</a>
+              <a href="#journey" className="orv-link-underline hover:text-blue-600 transition-colors whitespace-nowrap">Platform Journey</a>
+              <a href="#checkout" className="orv-link-underline hover:text-blue-600 transition-colors whitespace-nowrap">1-Tap Checkout</a>
+              <a href="#showcase" className="orv-link-underline hover:text-blue-600 transition-colors whitespace-nowrap">Live Brands</a>
+              <a href="#pricing" className="orv-link-underline hover:text-blue-600 transition-colors whitespace-nowrap">Pricing (₹ INR)</a>
             </nav>
           </div>
 
@@ -269,26 +380,26 @@ export default function PlatformWebsite({
         {/* ======================================================== */}
         <section className="pt-20 pb-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-center relative">
           {/* Category Pill */}
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-xs font-semibold text-blue-700 mb-8 shadow-xs">
+          <div className="orv-fade-in orv-d0 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-50 border border-blue-200 text-xs font-semibold text-blue-700 mb-8 shadow-xs">
             <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
             <span>The Modern Autonomous Multi-Tenant E-Commerce OS</span>
           </div>
 
           {/* High-Impact Hero Headline */}
-          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-slate-950 max-w-5xl mx-auto leading-[1.08] mb-6 font-display">
+          <h1 className="orv-fade-up orv-d1 text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight text-slate-950 max-w-5xl mx-auto leading-[1.08] mb-6 font-display">
             The commerce engine behind <br className="hidden sm:inline" />
-            <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-600 bg-clip-text text-transparent">
+            <span className="orv-shimmer-text">
               India&apos;s fastest growing brands
             </span>
           </h1>
 
-          <p className="text-base sm:text-xl text-slate-600 max-w-3xl mx-auto leading-relaxed mb-10 font-normal">
+          <p className="orv-fade-up orv-d2 text-base sm:text-xl text-slate-600 max-w-3xl mx-auto leading-relaxed mb-10 font-normal">
             Launch your custom online store with dedicated isolated databases, sub-200ms load speeds, 1-tap UPI checkout, and complete merchant control.
             <strong className="text-slate-900 font-semibold"> 0% transaction commissions. Everything you need to scale.</strong>
           </p>
 
           {/* Email Lead Capture Bar */}
-          <form onSubmit={handleHeroGetStarted} className="max-w-xl mx-auto mb-6">
+          <form onSubmit={handleHeroGetStarted} className="orv-fade-up orv-d3 max-w-xl mx-auto mb-6">
             <div className="flex flex-col sm:flex-row items-center gap-2 bg-white p-1.5 rounded-2xl sm:rounded-full border border-slate-300 shadow-xl focus-within:border-blue-600 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
               <input
                 type="email"
@@ -300,7 +411,8 @@ export default function PlatformWebsite({
               />
               <button
                 type="submit"
-                className="w-full sm:w-auto px-7 py-3 rounded-full text-xs sm:text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/25 transition-all cursor-pointer whitespace-nowrap"
+                onMouseDown={addRipple}
+                className="orv-ripple-host orv-cta-glow w-full sm:w-auto px-7 py-3 rounded-full text-xs sm:text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/25 transition-all cursor-pointer whitespace-nowrap"
               >
                 Start Free Trial →
               </button>
@@ -311,23 +423,23 @@ export default function PlatformWebsite({
           </form>
 
           {/* Live Telemetry Grid (Clean Light Surface) */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-6 rounded-2xl bg-white border border-slate-200/90 shadow-xl max-w-4xl mx-auto text-left mt-14">
-            <div className="p-3 border-r border-slate-100 last:border-0">
+          <div className="orv-scale-in orv-d4 grid grid-cols-2 sm:grid-cols-4 gap-4 p-6 rounded-2xl bg-white border border-slate-200/90 shadow-xl max-w-4xl mx-auto text-left mt-14">
+            <div className="orv-stat-anim orv-stat-anim-1 p-3 border-r border-slate-100 last:border-0">
               <p className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold">Live GMV Processed</p>
               <p className="text-xl sm:text-2xl font-bold text-emerald-600 mt-1 font-display">₹4.8 Cr+</p>
               <p className="text-[10px] text-slate-400 font-mono mt-0.5">Across active stores</p>
             </div>
-            <div className="p-3 border-r border-slate-100 last:border-0">
+            <div className="orv-stat-anim orv-stat-anim-2 p-3 border-r border-slate-100 last:border-0">
               <p className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold">Transaction Fee</p>
               <p className="text-xl sm:text-2xl font-bold text-slate-900 mt-1 font-display">0% Always</p>
               <p className="text-[10px] text-slate-400 font-mono mt-0.5">Keep 100% of revenue</p>
             </div>
-            <div className="p-3 border-r border-slate-100 last:border-0">
+            <div className="orv-stat-anim orv-stat-anim-3 p-3 border-r border-slate-100 last:border-0">
               <p className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold">Store Provisioning</p>
               <p className="text-xl sm:text-2xl font-bold text-blue-600 mt-1 font-display">&lt; 10 Seconds</p>
-              <p className="text-[10px] text-slate-400 font-mono mt-0.5">Automated .env & code</p>
+              <p className="text-[10px] text-slate-400 font-mono mt-0.5">Automated .env &amp; code</p>
             </div>
-            <div className="p-3">
+            <div className="orv-stat-anim orv-stat-anim-4 p-3">
               <p className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold">Data Architecture</p>
               <p className="text-xl sm:text-2xl font-bold text-indigo-600 mt-1 font-display">100% Isolated DB</p>
               <p className="text-[10px] text-slate-400 font-mono mt-0.5">Zero shared table leaks</p>
@@ -336,10 +448,304 @@ export default function PlatformWebsite({
         </section>
 
         {/* ======================================================== */}
+        {/* 1.5 ANNUAL COMMISSION SAVINGS CALCULATOR (MOVED TO TOP) */}
+        {/* ======================================================== */}
+        <section id="savings-calculator" className="py-14 sm:py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-slate-100">
+          <div className="orv-reveal text-center max-w-3xl mx-auto mb-10">
+            <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-mono font-bold uppercase tracking-wider mb-3 shadow-xs">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+              </span>
+              0% Transaction Commission • No App Add-on Tax
+            </span>
+            <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-950 tracking-tight font-display">
+              Annual Commission Savings Calculator
+            </h2>
+            <p className="text-slate-600 text-sm sm:text-base mt-3 max-w-2xl mx-auto">
+              Legacy platforms charge a 2.0% cut on Indian payment gateways plus ₹14,000+/mo for essential apps. See how much pure profit you retain with Orvexa Cloud.
+            </p>
+          </div>
+
+          {/* Quick Realistic Preset Scenarios */}
+          <div className="orv-reveal flex flex-wrap items-center justify-center gap-2 sm:gap-3 mb-8">
+            <span className="text-xs font-semibold text-slate-500 mr-1 flex items-center gap-1">
+              <span>⚡</span> Preset Scenarios:
+            </span>
+            {[
+              { label: 'Starter Boutique', orders: 400, aov: 1450, tag: '₹5.8L GMV' },
+              { label: 'Growing D2C Brand', orders: 1500, aov: 1950, tag: '₹29.25L GMV' },
+              { label: 'High Growth Scale', orders: 4500, aov: 2750, tag: '₹1.24 Cr GMV' },
+              { label: 'Enterprise D2C', orders: 10000, aov: 3400, tag: '₹3.40 Cr GMV' },
+            ].map((preset) => {
+              const isSelected = monthlySalesVolume === preset.orders && averageOrderValue === preset.aov
+              return (
+                <button
+                  key={preset.label}
+                  onClick={() => {
+                    setMonthlySalesVolume(preset.orders)
+                    setAverageOrderValue(preset.aov)
+                  }}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all duration-300 cursor-pointer flex items-center gap-1.5 transform active:scale-95 ${
+                    isSelected
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30 scale-105 font-bold ring-2 ring-blue-400/40'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 hover:scale-102'
+                  }`}
+                >
+                  <span>{preset.label}</span>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded transition-colors ${isSelected ? 'bg-blue-700/70 text-blue-100' : 'bg-slate-100 text-slate-500'}`}>
+                    {preset.tag}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Interactive Calculator Surface */}
+          <div className="orv-reveal rounded-3xl bg-gradient-to-b from-slate-50/80 to-white border border-slate-200/90 p-6 sm:p-10 lg:p-12 shadow-2xl shadow-slate-200/60 relative overflow-hidden">
+            {/* Ambient background decoration */}
+            <div className="absolute -top-24 -right-24 w-96 h-96 bg-blue-100/40 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-emerald-100/30 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+              <div className="lg:col-span-7 space-y-6">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <h3 className="text-xl sm:text-2xl font-bold text-slate-950 font-display">
+                      Calculate your exact savings
+                    </h3>
+                    <p className="text-xs sm:text-sm text-slate-600 mt-1">
+                      Adjust order volume and average order value (AOV) to view real-world Indian D2C figures.
+                    </p>
+                  </div>
+                  {annualSavings >= 500000 && (
+                    <span className="orv-sparkle-badge inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold shadow-xs">
+                      <span>✨</span> High ROI Tier
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-6 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/90 shadow-sm">
+                  {/* Monthly Orders Slider */}
+                  <div>
+                    <div className="flex justify-between items-baseline text-xs sm:text-sm font-semibold text-slate-800 mb-2">
+                      <span className="flex items-center gap-1.5">
+                        <span>📦</span> Monthly Orders:
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span key={`orders-${monthlySalesVolume}`} className="orv-number-animate font-mono text-lg font-bold text-blue-600">
+                          {monthlySalesVolume.toLocaleString('en-IN')}
+                        </span>
+                        <span className="text-xs font-normal text-slate-500">orders/mo</span>
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min={50}
+                      max={15000}
+                      step={50}
+                      value={monthlySalesVolume}
+                      onChange={(e) => setMonthlySalesVolume(Number(e.target.value))}
+                      style={{
+                        background: `linear-gradient(to right, #2563eb 0%, #2563eb ${((monthlySalesVolume - 50) / (15000 - 50)) * 100}%, #e2e8f0 ${((monthlySalesVolume - 50) / (15000 - 50)) * 100}%, #e2e8f0 100%)`,
+                      }}
+                      className="orv-range-slider cursor-pointer"
+                    />
+                    <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 mt-2">
+                      <span>50 orders</span>
+                      {/* Micro Quick adjustments */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setMonthlySalesVolume((v) => Math.max(50, v - 500))}
+                          className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
+                          title="Subtract 500 orders"
+                        >
+                          -500
+                        </button>
+                        <button
+                          onClick={() => setMonthlySalesVolume((v) => Math.min(15000, v + 500))}
+                          className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
+                          title="Add 500 orders"
+                        >
+                          +500
+                        </button>
+                        <button
+                          onClick={() => setMonthlySalesVolume((v) => Math.min(15000, v + 2000))}
+                          className="px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors cursor-pointer font-bold"
+                          title="Add 2,000 orders"
+                        >
+                          +2k
+                        </button>
+                      </div>
+                      <span>15,000 orders</span>
+                    </div>
+                  </div>
+
+                  {/* AOV Slider */}
+                  <div>
+                    <div className="flex justify-between items-baseline text-xs sm:text-sm font-semibold text-slate-800 mb-2">
+                      <span className="flex items-center gap-1.5">
+                        <span>🏷️</span> Average Order Value (AOV):
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span key={`aov-${averageOrderValue}`} className="orv-number-animate font-mono text-lg font-bold text-blue-600">
+                          ₹{averageOrderValue.toLocaleString('en-IN')}
+                        </span>
+                        <span className="text-xs font-normal text-slate-500">per order</span>
+                      </div>
+                    </div>
+                    <input
+                      type="range"
+                      min={300}
+                      max={15000}
+                      step={50}
+                      value={averageOrderValue}
+                      onChange={(e) => setAverageOrderValue(Number(e.target.value))}
+                      style={{
+                        background: `linear-gradient(to right, #2563eb 0%, #2563eb ${((averageOrderValue - 300) / (15000 - 300)) * 100}%, #e2e8f0 ${((averageOrderValue - 300) / (15000 - 300)) * 100}%, #e2e8f0 100%)`,
+                      }}
+                      className="orv-range-slider cursor-pointer"
+                    />
+                    <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 mt-2">
+                      <span>₹300</span>
+                      {/* Micro Quick adjustments */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setAverageOrderValue((v) => Math.max(300, v - 500))}
+                          className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
+                        >
+                          -₹500
+                        </button>
+                        <button
+                          onClick={() => setAverageOrderValue((v) => Math.min(15000, v + 500))}
+                          className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
+                        >
+                          +₹500
+                        </button>
+                        <button
+                          onClick={() => setAverageOrderValue((v) => Math.min(15000, v + 1500))}
+                          className="px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors cursor-pointer font-bold"
+                        >
+                          +₹1.5k
+                        </button>
+                      </div>
+                      <span>₹15,000</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Comparison Progress Bar */}
+                <div className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-xs space-y-2">
+                  <div className="flex justify-between text-xs font-semibold">
+                    <span className="text-slate-600 flex items-center gap-1.5">
+                      <span>📊</span> Monthly Platform Fee Burden:
+                    </span>
+                    <span className="font-mono text-emerald-600 font-bold">
+                      {Math.round((monthlySavings / legacyPlatformFee) * 100)}% Cost Eliminated
+                    </span>
+                  </div>
+                  <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden flex relative">
+                    <div
+                      className="orv-bar-fill h-full bg-emerald-500 rounded-l-full flex items-center justify-end pr-1 text-[8px] font-bold text-white"
+                      style={{ width: `${Math.max(6, (orvexaFlatFee / legacyPlatformFee) * 100)}%` }}
+                      title="Orvexa Flat Fee"
+                    />
+                    <div
+                      className="orv-bar-fill h-full bg-rose-500/80 rounded-r-full"
+                      style={{ width: `${Math.min(94, 100 - (orvexaFlatFee / legacyPlatformFee) * 100)}%` }}
+                      title="Legacy Platform Fees (Commission + Apps)"
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] font-mono">
+                    <span className="text-emerald-700 font-bold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                      Orvexa: ₹{orvexaFlatFee.toLocaleString('en-IN')}/mo
+                    </span>
+                    <span className="text-rose-600 font-bold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block" />
+                      Legacy Bleed: ₹{legacyPlatformFee.toLocaleString('en-IN')}/mo
+                    </span>
+                  </div>
+                </div>
+
+                {/* Transparent Realistic Itemized Cost Breakdown */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/90 border border-slate-200 text-xs font-mono space-y-2.5">
+                  <div className="flex justify-between items-center text-slate-700 pb-2 border-b border-slate-200">
+                    <span className="font-sans font-medium text-slate-600">Estimated Monthly GMV:</span>
+                    <span className="text-slate-950 font-bold text-sm">₹{monthlyGMV.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-600 hover:text-slate-900 transition-colors">
+                    <span className="font-sans flex items-center gap-1.5">
+                      <span className="text-rose-500">✕</span> Legacy 2% Gateway Commission Cut:
+                    </span>
+                    <span className="text-rose-600 font-semibold">₹{legacyCommissionCut.toLocaleString('en-IN')}/mo</span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-600 hover:text-slate-900 transition-colors">
+                    <span className="font-sans flex items-center gap-1.5">
+                      <span className="text-rose-500">✕</span> Legacy Base Plan + Essential App Stack:
+                    </span>
+                    <span className="text-rose-600 font-semibold">₹{(legacyBasePlan + legacyAppStack).toLocaleString('en-IN')}/mo</span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-600 pt-1 border-t border-slate-200/60">
+                    <span className="font-sans font-bold text-slate-800">Total Monthly Legacy Bleed:</span>
+                    <span className="text-rose-600 font-bold text-sm">₹{legacyPlatformFee.toLocaleString('en-IN')}/mo</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-emerald-50/90 -mx-2 px-3 py-2 rounded-xl text-emerald-900 font-bold shadow-xs border border-emerald-200/50">
+                    <span className="font-sans flex items-center gap-1.5">
+                      <span className="text-emerald-600">✓</span> Orvexa Flat Cost (0% Cut, Apps Included):
+                    </span>
+                    <span className="text-emerald-700 text-sm">₹{orvexaFlatFee.toLocaleString('en-IN')}/mo</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* High-Impact Savings Result Card */}
+              <div className="lg:col-span-5 bg-gradient-to-b from-white via-blue-50/30 to-emerald-50/30 border-2 border-blue-200 rounded-3xl p-6 sm:p-8 text-center space-y-4 shadow-xl relative overflow-hidden group hover:border-blue-300 transition-all">
+                <div className="absolute top-0 right-0 w-40 h-40 bg-emerald-400/15 rounded-full blur-2xl pointer-events-none" />
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-100 text-blue-700 text-[10px] font-mono font-bold uppercase tracking-widest shadow-xs">
+                  YOUR ESTIMATED ANNUAL SAVINGS
+                </div>
+                <div>
+                  <p
+                    key={`annual-${annualSavings}`}
+                    className="orv-number-animate orv-savings-glow text-4xl sm:text-5xl lg:text-6xl font-extrabold text-emerald-600 tracking-tight font-display"
+                  >
+                    ₹{annualSavings.toLocaleString('en-IN')}
+                  </p>
+                  <p
+                    key={`threeyr-${threeYearSavings}`}
+                    className="orv-number-animate text-xs font-mono text-emerald-700 font-semibold mt-1.5"
+                  >
+                    + ₹{threeYearSavings.toLocaleString('en-IN')} saved across 3 years
+                  </p>
+                </div>
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-sm mx-auto">
+                  Save <strong className="text-slate-900 font-bold">₹{monthlySavings.toLocaleString('en-IN')} every month</strong> by keeping 100% of customer payments directly in your merchant account.
+                </p>
+                <div className="pt-2 space-y-3">
+                  <button
+                    onClick={() => setShowApplyModal(true)}
+                    onMouseDown={addRipple}
+                    className="orv-ripple-host orv-cta-glow w-full py-3.5 rounded-full text-xs sm:text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/30 transition-all cursor-pointer transform hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    Start Saving with Orvexa →
+                  </button>
+                  <div className="flex items-center justify-center gap-3 text-[10px] text-slate-500 font-mono">
+                    <span>✓ Zero Onboarding Fee</span>
+                    <span>•</span>
+                    <span>✓ 30-Day Free Trial</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ======================================================== */}
         {/* 2. WHAT WE PROVIDE (CLEAN LIGHT PILLARS) */}
         {/* ======================================================== */}
         <section id="what-we-provide" className="py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-slate-100">
-          <div className="text-center max-w-3xl mx-auto mb-16">
+          <div className="orv-reveal text-center max-w-3xl mx-auto mb-16">
             <span className="text-[11px] font-mono uppercase tracking-widest text-blue-600 font-bold">
               WHAT WE PROVIDE
             </span>
@@ -353,7 +759,7 @@ export default function PlatformWebsite({
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {/* Feature 1 */}
-            <div className="p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-blue-300 transition-all group flex flex-col justify-between">
+            <div className="orv-reveal orv-reveal-scale orv-card-pop p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm group flex flex-col justify-between">
               <div>
                 <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-2xl mb-6 group-hover:scale-110 transition-transform text-blue-600">
                   🗄️
@@ -369,7 +775,7 @@ export default function PlatformWebsite({
             </div>
 
             {/* Feature 2 */}
-            <div className="p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-indigo-300 transition-all group flex flex-col justify-between">
+            <div className="orv-reveal orv-reveal-scale orv-card-pop p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm group flex flex-col justify-between" style={{ transitionDelay: '80ms' }}>
               <div>
                 <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-2xl mb-6 group-hover:scale-110 transition-transform text-indigo-600">
                   ⚡
@@ -385,7 +791,7 @@ export default function PlatformWebsite({
             </div>
 
             {/* Feature 3 */}
-            <div className="p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-emerald-300 transition-all group flex flex-col justify-between">
+            <div className="orv-reveal orv-reveal-scale orv-card-pop p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm group flex flex-col justify-between" style={{ transitionDelay: '160ms' }}>
               <div>
                 <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-2xl mb-6 group-hover:scale-110 transition-transform text-emerald-600">
                   💳
@@ -401,7 +807,7 @@ export default function PlatformWebsite({
             </div>
 
             {/* Feature 4 */}
-            <div className="p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-amber-300 transition-all group flex flex-col justify-between">
+            <div className="orv-reveal orv-reveal-scale orv-card-pop p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm group flex flex-col justify-between" style={{ transitionDelay: '240ms' }}>
               <div>
                 <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-2xl mb-6 group-hover:scale-110 transition-transform text-amber-600">
                   📊
@@ -417,7 +823,7 @@ export default function PlatformWebsite({
             </div>
 
             {/* Feature 5 */}
-            <div className="p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-sky-300 transition-all group flex flex-col justify-between">
+            <div className="orv-reveal orv-reveal-scale orv-card-pop p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm group flex flex-col justify-between" style={{ transitionDelay: '320ms' }}>
               <div>
                 <div className="w-12 h-12 rounded-2xl bg-sky-50 border border-sky-200 flex items-center justify-center text-2xl mb-6 group-hover:scale-110 transition-transform text-sky-600">
                   🌐
@@ -433,7 +839,7 @@ export default function PlatformWebsite({
             </div>
 
             {/* Feature 6 */}
-            <div className="p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-rose-300 transition-all group flex flex-col justify-between">
+            <div className="orv-reveal orv-reveal-scale orv-card-pop p-8 rounded-3xl bg-white border border-slate-200/90 shadow-sm group flex flex-col justify-between" style={{ transitionDelay: '400ms' }}>
               <div>
                 <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-2xl mb-6 group-hover:scale-110 transition-transform text-rose-600">
                   ✨
@@ -454,7 +860,7 @@ export default function PlatformWebsite({
         {/* 3. THE 4 MILESTONE JOURNEYS (START, SELL, MARKET, MANAGE) */}
         {/* ======================================================== */}
         <section id="journey" className="py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-slate-100">
-          <div className="text-center max-w-3xl mx-auto mb-12">
+          <div className="orv-reveal text-center max-w-3xl mx-auto mb-12">
             <span className="text-[11px] font-mono uppercase tracking-widest text-blue-600 font-bold">
               THE COMMERCE JOURNEY
             </span>
@@ -491,7 +897,7 @@ export default function PlatformWebsite({
           {/* Pillar Card Container (Clean Light Mode) */}
           <div className="rounded-3xl bg-slate-50 border border-slate-200/90 p-8 sm:p-12 shadow-xl relative overflow-hidden">
             {selectedPillar === 'start' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+              <div className="orv-panel-enter grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
                 <div className="lg:col-span-6 space-y-6">
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-xs font-mono font-bold">
                     STOREFRONT ARCHITECTURE
@@ -557,7 +963,7 @@ export default function PlatformWebsite({
             )}
 
             {selectedPillar === 'sell' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+              <div className="orv-panel-enter grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
                 <div className="lg:col-span-6 space-y-6">
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-100 text-indigo-800 text-xs font-mono font-bold">
                     OMNICHANNEL COMMERCE
@@ -622,7 +1028,7 @@ export default function PlatformWebsite({
             )}
 
             {selectedPillar === 'market' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+              <div className="orv-panel-enter grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
                 <div className="lg:col-span-6 space-y-6">
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-mono font-bold">
                     MARKETING CRM
@@ -689,7 +1095,7 @@ export default function PlatformWebsite({
             )}
 
             {selectedPillar === 'manage' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+              <div className="orv-panel-enter grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
                 <div className="lg:col-span-6 space-y-6">
                   <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-200 text-slate-800 text-xs font-mono font-bold">
                     MERCHANT BACKOFFICE
@@ -889,63 +1295,6 @@ export default function PlatformWebsite({
           </div>
         </section>
 
-        {/* ======================================================== */}
-        {/* 5. ORVEXA MAGIC AI GENERATOR */}
-        {/* ======================================================== */}
-        <section id="ai-magic" className="py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-slate-100">
-          <div className="text-center max-w-3xl mx-auto mb-14">
-            <span className="text-[11px] font-mono uppercase tracking-widest text-indigo-600 font-bold px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200">
-              ✨ ORVEXA MAGIC AI
-            </span>
-            <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-950 mt-3 tracking-tight font-display">
-              Build and write faster with AI
-            </h2>
-            <p className="text-slate-600 text-sm sm:text-base mt-3">
-              Generate high-converting product copy, auto-tag categories, and draft marketing emails in seconds.
-            </p>
-          </div>
-
-          <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-10 shadow-xl space-y-6">
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
-                Enter Product Features or Prompt:
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={aiProductPrompt}
-                  onChange={(e) => setAiProductPrompt(e.target.value)}
-                  placeholder="e.g. Handmade terracotta ceramic vase with rustic finish"
-                  className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-xs text-slate-900 placeholder-slate-400 outline-none focus:border-indigo-600 focus:bg-white transition-all shadow-inner"
-                />
-                <button
-                  type="button"
-                  onClick={handleAiGenerate}
-                  disabled={isAiGenerating}
-                  className="px-5 py-3 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2 whitespace-nowrap shadow-md shadow-indigo-600/20"
-                >
-                  {isAiGenerating ? 'Generating...' : '✨ Generate Copy'}
-                </button>
-              </div>
-            </div>
-
-            {aiGeneratedOutput ? (
-              <div className="p-5 rounded-2xl bg-indigo-50/70 border border-indigo-200 space-y-2 animate-fade-in">
-                <div className="flex items-center justify-between text-[11px] font-mono text-indigo-700 font-bold">
-                  <span>AI GENERATED HIGH-CONVERTING COPY</span>
-                  <span>100% SEO OPTIMIZED</span>
-                </div>
-                <p className="text-xs sm:text-sm text-slate-800 leading-relaxed font-sans">
-                  {aiGeneratedOutput}
-                </p>
-              </div>
-            ) : (
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-400">
-                Click &quot;Generate Copy&quot; above to see Orvexa Magic in action.
-              </div>
-            )}
-          </div>
-        </section>
 
         {/* ======================================================== */}
         {/* 6. LIVE BRANDS SHOWCASE */}
@@ -979,17 +1328,18 @@ export default function PlatformWebsite({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {filteredShowcase.map((brand) => (
+            {filteredShowcase.map((brand, i) => (
               <div
                 key={brand.id}
-                className="rounded-3xl bg-white border border-slate-200/90 hover:border-blue-300 hover:shadow-xl overflow-hidden flex flex-col justify-between group transition-all"
+                className="orv-reveal orv-card-pop rounded-3xl bg-white border border-slate-200/90 overflow-hidden flex flex-col justify-between group"
+                style={{ transitionDelay: `${i * 100}ms` }}
               >
                 <div>
                   <div className="relative aspect-video overflow-hidden bg-slate-100">
                     <img
                       src={brand.image}
                       alt={brand.name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      className="orv-brand-img w-full h-full object-cover"
                     />
                     <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-white/90 backdrop-blur-md text-[10px] font-mono font-bold text-emerald-700 border border-slate-200 shadow-xs">
                       {brand.revenue}
@@ -1092,7 +1442,7 @@ export default function PlatformWebsite({
             </div>
 
             {/* Growth Pro */}
-            <div className="p-8 rounded-3xl bg-white border-2 border-blue-600 shadow-2xl relative flex flex-col justify-between transform -translate-y-2">
+            <div className="orv-price-pulse orv-card-pop p-8 rounded-3xl bg-white border-2 border-blue-600 shadow-2xl relative flex flex-col justify-between transform -translate-y-2">
               <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-blue-600 text-white text-[10px] font-mono font-bold uppercase tracking-widest shadow-md">
                 MOST POPULAR
               </div>
@@ -1117,7 +1467,8 @@ export default function PlatformWebsite({
               </div>
               <button
                 onClick={() => setShowApplyModal(true)}
-                className="w-full mt-8 py-3 rounded-full text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+                onMouseDown={addRipple}
+                className="orv-ripple-host orv-cta-glow w-full mt-8 py-3 rounded-full text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
               >
                 Start Free 30-Day Trial
               </button>
@@ -1150,76 +1501,23 @@ export default function PlatformWebsite({
             </div>
           </div>
 
-          {/* ROI Calculator Card */}
-          <div className="rounded-3xl bg-slate-50 border border-slate-200 p-8 sm:p-12 shadow-lg">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-              <div className="lg:col-span-7 space-y-6">
-                <h3 className="text-2xl font-bold text-slate-950 font-display">Annual commission savings calculator</h3>
-                <p className="text-xs text-slate-600">
-                  Legacy platforms charge a 2% cut per transaction plus costly app add-ons. See your savings with Orvexa.
-                </p>
-
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex justify-between text-xs font-semibold text-slate-700 mb-2">
-                      <span>Monthly Orders:</span>
-                      <span className="font-mono text-blue-600">{monthlySalesVolume.toLocaleString()} orders</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={100}
-                      max={5000}
-                      step={50}
-                      value={monthlySalesVolume}
-                      onChange={(e) => setMonthlySalesVolume(Number(e.target.value))}
-                      className="w-full accent-blue-600 cursor-pointer"
-                    />
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between text-xs font-semibold text-slate-700 mb-2">
-                      <span>Average Order Value (AOV):</span>
-                      <span className="font-mono text-blue-600">₹{averageOrderValue.toLocaleString()}</span>
-                    </div>
-                    <input
-                      type="range"
-                      min={500}
-                      max={10000}
-                      step={100}
-                      value={averageOrderValue}
-                      onChange={(e) => setAverageOrderValue(Number(e.target.value))}
-                      className="w-full accent-blue-600 cursor-pointer"
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-2 text-xs font-mono text-slate-600 space-y-1">
-                  <p>Estimated Monthly GMV: <span className="text-slate-950 font-bold">₹{monthlyGMV.toLocaleString()}</span></p>
-                  <p>Legacy Fees (Plan + 2% Cut + Apps): <span className="text-rose-600 font-bold">₹{legacyPlatformFee.toLocaleString()}/mo</span></p>
-                  <p>Orvexa Flat Cost (0% Cut): <span className="text-emerald-600 font-bold">₹{orvexaFlatFee.toLocaleString()}/mo</span></p>
-                </div>
+          {/* Commission Guarantee Banner */}
+          <div className="rounded-3xl bg-slate-900 text-white p-8 sm:p-10 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-6 border border-slate-800">
+            <div className="space-y-2 text-center sm:text-left">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold">
+                ✓ 100% PROFIT RETENTION
               </div>
-
-              <div className="lg:col-span-5 bg-white border border-blue-200 rounded-2xl p-8 text-center space-y-3 shadow-xl">
-                <p className="text-xs font-mono uppercase tracking-widest text-blue-600 font-bold">
-                  YOUR ESTIMATED ANNUAL SAVINGS
-                </p>
-                <p className="text-4xl sm:text-5xl font-extrabold text-emerald-600 tracking-tight font-display">
-                  ₹{annualSavings.toLocaleString()}
-                </p>
-                <p className="text-xs text-slate-600">
-                  Save ₹{monthlySavings.toLocaleString()} every month by retaining 100% of customer payments.
-                </p>
-                <div className="pt-2">
-                  <button
-                    onClick={() => setShowApplyModal(true)}
-                    className="w-full py-3 rounded-full text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all cursor-pointer"
-                  >
-                    Start Saving with Orvexa →
-                  </button>
-                </div>
-              </div>
+              <h3 className="text-xl sm:text-2xl font-bold font-display">Never pay transaction commissions again</h3>
+              <p className="text-xs text-slate-400 max-w-xl">
+                Unlike platforms taking up to 2% from every sale you make, Orvexa charges only a transparent flat subscription fee.
+              </p>
             </div>
+            <a
+              href="#savings-calculator"
+              className="px-6 py-3 rounded-full text-xs font-bold bg-white text-slate-950 hover:bg-slate-100 transition-all shadow-md shrink-0 cursor-pointer"
+            >
+              Recalculate Savings ↑
+            </a>
           </div>
         </section>
 
@@ -1227,7 +1525,7 @@ export default function PlatformWebsite({
         {/* 8. FAQ ACCORDION */}
         {/* ======================================================== */}
         <section id="faq" className="py-20 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto border-t border-slate-100">
-          <div className="text-center mb-12">
+          <div className="orv-reveal text-center mb-12">
             <span className="text-[11px] font-mono uppercase tracking-widest text-blue-600 font-bold">
               FREQUENTLY ASKED QUESTIONS
             </span>
@@ -1242,7 +1540,7 @@ export default function PlatformWebsite({
               },
               {
                 q: 'Can I connect my own custom domain (e.g., yourbrand.in / yourbrand.com)?',
-                a: 'Yes. Every store automatically gets a free subdomain (yourbrand.orvexatech.com), and you can connect any custom domain with automated Let\'s Encrypt SSL certificates from your dashboard.',
+                a: "Yes. Every store automatically gets a free subdomain (yourbrand.orvexatech.com), and you can connect any custom domain with automated Let's Encrypt SSL certificates from your dashboard.",
               },
               {
                 q: 'How does Indian payment processing and COD work?',
@@ -1252,23 +1550,34 @@ export default function PlatformWebsite({
                 q: 'How long does it take to get my store up and running?',
                 a: 'Once your application is submitted, our automated engine provisions your database, tenant folder, initial catalog, and theme in under 10 seconds.',
               },
+              {
+                q: 'Is there a free trial? What happens when it ends?',
+                a: 'Yes — every new store gets a full 30-day free trial with no credit card required. At the end of the trial, you can choose a plan or your store enters a read-only grace period for 7 days.',
+              },
             ].map((faq, idx) => (
               <div
                 key={idx}
-                className="rounded-2xl bg-white border border-slate-200 overflow-hidden shadow-xs"
+                className={`orv-reveal rounded-2xl bg-white border overflow-hidden shadow-xs transition-all duration-300 ${
+                  activeFaq === idx ? 'orv-faq-open-state border-blue-200 shadow-md shadow-blue-500/5' : 'border-slate-200'
+                }`}
+                style={{ transitionDelay: `${idx * 60}ms` }}
               >
                 <button
                   onClick={() => setActiveFaq(activeFaq === idx ? null : idx)}
-                  className="w-full px-6 py-4 text-left flex items-center justify-between text-sm font-semibold text-slate-900 cursor-pointer hover:bg-slate-50 transition-colors"
+                  className="w-full px-6 py-4 text-left flex items-center justify-between text-sm font-semibold text-slate-900 cursor-pointer hover:bg-slate-50/80 transition-colors group"
                 >
-                  <span>{faq.q}</span>
-                  <span className="text-blue-600 font-bold text-lg">{activeFaq === idx ? '−' : '+'}</span>
+                  <span className={activeFaq === idx ? 'text-blue-700' : ''}>{faq.q}</span>
+                  <span className={`orv-faq-icon w-7 h-7 rounded-full flex items-center justify-center text-base font-bold shrink-0 ml-4 transition-all ${
+                    activeFaq === idx ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500 group-hover:bg-blue-50 group-hover:text-blue-600'
+                  }`}>
+                    +
+                  </span>
                 </button>
-                {activeFaq === idx && (
+                <div className={`orv-faq-answer ${activeFaq === idx ? 'orv-faq-open' : ''}`}>
                   <div className="px-6 pb-5 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-3">
                     {faq.a}
                   </div>
-                )}
+                </div>
               </div>
             ))}
           </div>
@@ -1279,8 +1588,8 @@ export default function PlatformWebsite({
       {/* 9. ONBOARDING MODAL (CLEAN LIGHT THEME) */}
       {/* ======================================================== */}
       {showApplyModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-2xl w-full p-6 sm:p-8 text-slate-900 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 orv-fade-in">
+          <div className="orv-scale-in bg-white border border-slate-200 rounded-3xl max-w-2xl w-full p-6 sm:p-8 text-slate-900 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => {
                 setShowApplyModal(false)
@@ -1430,7 +1739,8 @@ export default function PlatformWebsite({
                 <button
                   type="submit"
                   disabled={formSubmitting || slugStatus === 'taken'}
-                  className="w-full mt-3 py-3.5 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/25 transition-all cursor-pointer disabled:opacity-50"
+                  onMouseDown={addRipple}
+                  className="orv-ripple-host orv-cta-glow w-full mt-3 py-3.5 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/25 transition-all cursor-pointer disabled:opacity-50"
                 >
                   {formSubmitting ? 'Creating your store...' : 'Complete & Launch 30-Day Free Trial →'}
                 </button>
@@ -1466,7 +1776,6 @@ export default function PlatformWebsite({
             <ul className="space-y-2 text-xs">
               <li><a href="#what-we-provide" className="hover:text-blue-600 transition-colors">Storefront Engine</a></li>
               <li><a href="#checkout" className="hover:text-blue-600 transition-colors">1-Tap UPI Checkout</a></li>
-              <li><a href="#ai-magic" className="hover:text-blue-600 transition-colors">Orvexa Magic AI</a></li>
               <li><a href="#showcase" className="hover:text-blue-600 transition-colors">Live Brand Demos</a></li>
             </ul>
           </div>
@@ -1475,8 +1784,7 @@ export default function PlatformWebsite({
             <p className="font-bold text-slate-950 mb-3 text-xs uppercase tracking-wider">Platform</p>
             <ul className="space-y-2 text-xs">
               <li><a href="#pricing" className="hover:text-blue-600 transition-colors">Pricing & Plans</a></li>
-              <li><a href="/?panel=dashboard&tenant=lunar" target="_blank" className="hover:text-blue-600 transition-colors">Merchant Portal</a></li>
-              <li><button onClick={isSuperAdminLoggedIn ? onOpenAdminConsole : onOpenAdminLogin} className="hover:text-blue-600 text-left cursor-pointer underline">Super Admin Gateway</button></li>
+              <li><button onClick={isSuperAdminLoggedIn ? onOpenAdminConsole : onOpenAdminLogin} className="hover:text-blue-600 text-left cursor-pointer">Account & Console Login</button></li>
               <li><a href="#faq" className="hover:text-blue-600 transition-colors">FAQ & Support</a></li>
             </ul>
           </div>
@@ -1491,15 +1799,27 @@ export default function PlatformWebsite({
           </div>
         </div>
 
-        <div className="max-w-7xl mx-auto pt-8 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-slate-500">
-          <p>© {new Date().getFullYear()} Orvexa Tech Private Limited. All rights reserved.</p>
-          <div className="flex gap-6">
-            <a href="#" className="hover:text-slate-800">Privacy Policy</a>
-            <a href="#" className="hover:text-slate-800">Terms of Service</a>
-            <a href="#" className="hover:text-slate-800">Merchant Agreement</a>
+        <div className="max-w-7xl mx-auto pt-8 border-t border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 text-[11px] text-slate-500">
+          <div className="space-y-3">
+            <ComplianceFooterLinks onOpenComplianceDoc={handleOpenCompliance} theme="light" />
+            <p>© {new Date().getFullYear()} Orvexa Tech Private Limited. All rights reserved.</p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+            <a href="#what-we-provide" className="hover:text-slate-800 transition-colors">Platform Architecture</a>
+            <a href="#pricing" className="hover:text-slate-800 transition-colors">Enterprise SLA</a>
+            <button onClick={() => handleOpenCompliance('gdpr')} className="hover:text-blue-600 text-left cursor-pointer">
+              DPA Agreement
+            </button>
           </div>
         </div>
       </footer>
+
+      {/* Orvexa Tech Trust, GDPR, DPDP & Legal Compliance Modal */}
+      <LegalComplianceModal
+        isOpen={complianceModalOpen}
+        initialTab={complianceDoc}
+        onClose={() => setComplianceModalOpen(false)}
+      />
     </div>
   )
 }

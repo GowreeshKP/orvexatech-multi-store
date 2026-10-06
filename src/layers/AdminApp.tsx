@@ -1,9 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAdminTenants, useAdminApplications, usePlatformStats } from '@/api/hooks'
 import { authService, type AdminSession } from '@/api/auth'
-import AdminLogin from '@/components/auth/AdminLogin'
+import { auditLogger } from '@/api/audit-logger'
+import CommonLoginModal from '@/components/auth/CommonLoginModal'
+import ResetPasswordModal from '@/components/auth/ResetPasswordModal'
 import PlatformWebsite from '@/components/platform/PlatformWebsite'
-import type { TenantConfig, TenantApplication } from '@/types/tenant'
+import StoreCredentialsModal from '@/components/auth/StoreCredentialsModal'
+import ProvisionStoreModal from '@/components/platform/ProvisionStoreModal'
+import PlatformAuditLogs from '@/components/platform/PlatformAuditLogs'
+import type { TenantConfig } from '@/types/tenant'
 
 const ADMIN_NAV = [
   { id: 'dashboard', label: 'Platform Overview', icon: 'overview' },
@@ -12,6 +17,7 @@ const ADMIN_NAV = [
   { id: 'stores', label: 'Tenant Stores', icon: 'stores' },
   { id: 'billing', label: 'Subscriptions & Billing', icon: 'billing' },
   { id: 'domains', label: 'Domains & Routing', icon: 'domains' },
+  { id: 'audit', label: 'Security & Audit Trail', icon: 'audit' },
 ] as const
 
 type AdminView = (typeof ADMIN_NAV)[number]['id']
@@ -53,6 +59,12 @@ function NavIcon({ type, className = 'w-4 h-4' }: { type: string; className?: st
       return (
         <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-.778.099-1.533.284-2.253" />
+        </svg>
+      )
+    case 'audit':
+      return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
         </svg>
       )
     default:
@@ -105,6 +117,25 @@ export default function AdminApp() {
   const [activeView, setActiveView] = useState<AdminView>('dashboard')
   const [displayMode, setDisplayMode] = useState<'website' | 'console'>('website')
   const [showLoginModal, setShowLoginModal] = useState(false)
+  const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false)
+  const [adminToast, setAdminToast] = useState<string | null>(null)
+  const { provisionTenant, refresh: refreshTenants } = useAdminTenants()
+
+  // URL Reset Token Detection for Store Owners
+  const [resetToken, setResetToken] = useState<string | null>(null)
+  const [resetSlug, setResetSlug] = useState<string | null>(null)
+  const [isResetOpen, setIsResetOpen] = useState(false)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const token = params.get('reset_token')
+    const slug = params.get('slug')
+    if (token) {
+      setResetToken(token)
+      setResetSlug(slug || 'lunar')
+      setIsResetOpen(true)
+    }
+  }, [])
 
   const handleLogout = () => {
     authService.logoutAdmin()
@@ -112,10 +143,17 @@ export default function AdminApp() {
     setDisplayMode('website')
   }
 
-  const handleLoginSuccess = (newSession: AdminSession) => {
-    setSession(newSession)
-    setShowLoginModal(false)
-    setDisplayMode('console')
+  const handleLoginSuccess = (newSession?: any) => {
+    if (newSession?.role === 'super_admin') {
+      setSession(newSession)
+      setShowLoginModal(false)
+      setDisplayMode('console')
+    } else if (newSession?.tenantSlug) {
+      setShowLoginModal(false)
+      window.location.href = `/?panel=dashboard&tenant=${newSession.tenantSlug}`
+    } else {
+      setShowLoginModal(false)
+    }
   }
 
   // If in public website mode, render the high-impact client acquisition platform website
@@ -128,21 +166,24 @@ export default function AdminApp() {
           isSuperAdminLoggedIn={!!session}
         />
 
-        {/* Super Admin Login Modal */}
-        {showLoginModal && (
-          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-            <div className="relative w-full max-w-md">
-              <button
-                onClick={() => setShowLoginModal(false)}
-                className="absolute top-4 right-4 z-20 text-slate-400 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors"
-                title="Close"
-              >
-                ✕
-              </button>
-              <AdminLogin onLoginSuccess={handleLoginSuccess} />
-            </div>
-          </div>
-        )}
+        {/* Unified Common Login Modal */}
+        <CommonLoginModal
+          isOpen={showLoginModal}
+          onClose={() => setShowLoginModal(false)}
+          onSuccess={handleLoginSuccess}
+        />
+
+        {/* Password Reset Modal */}
+        <ResetPasswordModal
+          isOpen={isResetOpen}
+          resetToken={resetToken || undefined}
+          tenantSlug={resetSlug || undefined}
+          onClose={() => {
+            setIsResetOpen(false)
+            setResetToken(null)
+            setResetSlug(null)
+          }}
+        />
       </div>
     )
   }
@@ -150,8 +191,12 @@ export default function AdminApp() {
   // If in console mode but session expired, require login
   if (!session) {
     return (
-      <div className="relative min-h-screen">
-        <AdminLogin onLoginSuccess={handleLoginSuccess} />
+      <div className="relative min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <CommonLoginModal
+          isOpen={true}
+          onClose={() => setDisplayMode('website')}
+          onSuccess={handleLoginSuccess}
+        />
         <button
           onClick={() => setDisplayMode('website')}
           className="fixed top-5 left-5 z-50 text-xs font-semibold px-3.5 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 border border-slate-700 shadow-lg flex items-center gap-2 cursor-pointer"
@@ -303,14 +348,55 @@ export default function AdminApp() {
 
         {/* Content Container */}
         <div className="p-8 max-w-7xl mx-auto">
-          {activeView === 'dashboard' && <PlatformOverview onSwitchView={setActiveView} />}
+          {activeView === 'dashboard' && (
+            <PlatformOverview
+              onSwitchView={setActiveView}
+              onOpenProvisionModal={() => setIsProvisionModalOpen(true)}
+            />
+          )}
           {activeView === 'applications' && <ApplicationQueue />}
           {activeView === 'leads' && <ClientLeadsCRM onSwitchView={setActiveView} />}
-          {activeView === 'stores' && <TenantDirectory />}
+          {activeView === 'stores' && (
+            <TenantDirectory onOpenProvisionModal={() => setIsProvisionModalOpen(true)} />
+          )}
           {activeView === 'billing' && <BillingManager />}
           {activeView === 'domains' && <DomainManager />}
+          {activeView === 'audit' && <PlatformAuditLogs />}
         </div>
       </main>
+
+      {/* Provision Store Modal */}
+      <ProvisionStoreModal
+        isOpen={isProvisionModalOpen}
+        onClose={() => setIsProvisionModalOpen(false)}
+        onProvision={provisionTenant}
+        onSuccess={(newTenant) => {
+          refreshTenants()
+          setActiveView('stores')
+          setAdminToast(`✅ Store "${newTenant.brandName}" provisioned with isolated database orvexa_tenant_${newTenant.slug}!`)
+          setTimeout(() => setAdminToast(null), 5000)
+        }}
+      />
+
+      {/* Password Reset Modal in Console */}
+      <ResetPasswordModal
+        isOpen={isResetOpen}
+        resetToken={resetToken || undefined}
+        tenantSlug={resetSlug || undefined}
+        onClose={() => {
+          setIsResetOpen(false)
+          setResetToken(null)
+          setResetSlug(null)
+        }}
+      />
+
+      {/* Global Admin Toast */}
+      {adminToast && (
+        <div className="fixed top-6 right-6 z-50 bg-slate-900 border border-emerald-500/40 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-xs animate-slide-down">
+          <span className="w-5 h-5 rounded-full bg-emerald-500 text-slate-950 font-bold flex items-center justify-center text-[11px]">✓</span>
+          <span>{adminToast}</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -338,7 +424,13 @@ function LeadsBadge() {
 // =====================================================
 // 1. Platform Overview (Enterprise Redesign)
 // =====================================================
-function PlatformOverview({ onSwitchView }: { onSwitchView: (v: AdminView) => void }) {
+function PlatformOverview({
+  onSwitchView,
+  onOpenProvisionModal,
+}: {
+  onSwitchView: (v: AdminView) => void
+  onOpenProvisionModal: () => void
+}) {
   const { stats } = usePlatformStats()
   const { tenants } = useAdminTenants()
   const { applications } = useAdminApplications()
@@ -435,7 +527,7 @@ function PlatformOverview({ onSwitchView }: { onSwitchView: (v: AdminView) => vo
           {/* Quick Action Buttons */}
           <div className="flex items-center gap-3 flex-wrap">
             <button
-              onClick={() => onSwitchView('stores')}
+              onClick={onOpenProvisionModal}
               className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-white text-slate-950 hover:bg-slate-100 transition-all cursor-pointer shadow-md shadow-white/10 flex items-center gap-2"
             >
               <span>⊕</span>
@@ -624,6 +716,18 @@ function ApplicationQueue() {
 
   const handleApproveWithFeedback = (id: string, slug: string, brandName: string) => {
     approve(id)
+    auditLogger.log({
+      tenantSlug: slug,
+      tenantName: brandName,
+      actorId: 'admin_master_001',
+      actorName: 'Orvexa Super Admin',
+      actorRole: 'super_admin',
+      action: 'STORE_PROVISIONED',
+      category: 'provisioning',
+      severity: 'info',
+      details: `Super Admin approved merchant application and provisioned store "${brandName}" with isolated database orvexa_tenant_${slug}.`,
+      metadata: { applicationId: id, slug, brandName },
+    })
     setProvisionMessage(`✅ Successfully approved ${brandName}! Generated client folder 'src/tenants/${slug}/', initialized 'tenant.env', and provisioned isolated database 'orvexa_tenant_${slug}'.`)
     setTimeout(() => setProvisionMessage(null), 6000)
   }
@@ -907,13 +1011,20 @@ function ClientLeadsCRM({ onSwitchView }: { onSwitchView: (v: AdminView) => void
 }
 
 // =====================================================
-// 4. Tenant Directory
+// 4. Tenant Directory & Store Access Management
 // =====================================================
-function TenantDirectory() {
-  const { tenants, suspend, reactivate, changePlan } = useAdminTenants()
+function TenantDirectory({ onOpenProvisionModal }: { onOpenProvisionModal?: () => void }) {
+  const { tenants, suspend, reactivate, changePlan, refresh } = useAdminTenants()
   const [search, setSearch] = useState('')
   const [inspectTenant, setInspectTenant] = useState<TenantConfig | null>(null)
+  const [credentialsTenant, setCredentialsTenant] = useState<TenantConfig | null>(null)
   const [copiedEnv, setCopiedEnv] = useState(false)
+  const [toastMsg, setToastMsg] = useState<string | null>(null)
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(null), 3500)
+  }
 
   const filtered = tenants.filter((t) =>
     t.brandName.toLowerCase().includes(search.toLowerCase()) ||
@@ -952,7 +1063,37 @@ ENABLE_CUSTOMER_REVIEWS=${t.theme.enableReviews}`
 
   return (
     <div className="space-y-6 max-w-6xl">
-      <div className="flex items-center justify-between gap-4">
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className="fixed top-6 right-6 z-50 bg-slate-900 border border-emerald-500/40 text-white px-5 py-3 rounded-xl shadow-2xl flex items-center gap-3 text-xs animate-slide-down">
+          <span className="w-5 h-5 rounded-full bg-emerald-500 text-slate-950 font-bold flex items-center justify-center text-[11px]">✓</span>
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
+      {/* Credentials Banner */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950/60 to-slate-900 border border-slate-800 rounded-2xl p-5 text-white flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🔐</span>
+            <h3 className="text-sm font-bold text-white tracking-tight">Store Authentication & Credentials Management</h3>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              Super Admin Master Control
+            </span>
+          </div>
+          <p className="text-xs text-slate-300/80">
+            Set custom usernames, login emails, and passwords for any store owner. Generate instant onboarding access passes for handover.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-mono text-amber-300 font-semibold bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20">
+            🔑 {tenants.length} Stores Protected
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="relative flex-1 max-w-md">
           <input
             value={search}
@@ -961,7 +1102,18 @@ ENABLE_CUSTOMER_REVIEWS=${t.theme.enableReviews}`
             className="w-full bg-white border border-slate-200 px-3.5 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 outline-none rounded-lg shadow-xs transition-all"
           />
         </div>
-        <p className="text-xs font-mono text-slate-500">{filtered.length} Active Stores Provisioned</p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs font-mono text-slate-500 hidden sm:block">{filtered.length} Active Stores Provisioned</p>
+          {onOpenProvisionModal && (
+            <button
+              onClick={onOpenProvisionModal}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <span>⊕</span>
+              <span>Provision New Store</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
@@ -974,7 +1126,7 @@ ENABLE_CUSTOMER_REVIEWS=${t.theme.enableReviews}`
                 <th className="text-left px-4 py-3">Owner Contact</th>
                 <th className="text-left px-4 py-3">Plan Tier</th>
                 <th className="text-left px-4 py-3">Status</th>
-                <th className="text-right px-5 py-3">Actions</th>
+                <th className="text-right px-5 py-3">Credentials & Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1013,30 +1165,41 @@ ENABLE_CUSTOMER_REVIEWS=${t.theme.enableReviews}`
                   </td>
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      {/* Prominent Credentials Button */}
+                      <button
+                        onClick={() => setCredentialsTenant(tenant)}
+                        className="px-2.5 py-1 text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 rounded border border-amber-300 transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                        title="Set or reset store owner password and login credentials"
+                      >
+                        <span>🔑</span>
+                        <span>Credentials</span>
+                      </button>
+
                       <button
                         onClick={() => setInspectTenant(tenant)}
-                        className="px-2.5 py-1 text-[11px] font-mono font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded border border-slate-200 transition-colors cursor-pointer"
+                        className="px-2 py-1 text-[11px] font-mono font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded border border-slate-200 transition-colors cursor-pointer"
+                        title="View .env file"
                       >
                         .env
                       </button>
                       <a
                         href={`/?tenant=${tenant.slug}`}
                         target="_blank"
-                        className="px-2.5 py-1 text-[11px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 transition-colors"
+                        className="px-2 py-1 text-[11px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 transition-colors"
                       >
                         Visit ↗
                       </a>
                       {tenant.status === 'active' ? (
                         <button
                           onClick={() => suspend(tenant.id)}
-                          className="px-2.5 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 rounded border border-rose-200 transition-colors cursor-pointer"
+                          className="px-2 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 rounded border border-rose-200 transition-colors cursor-pointer"
                         >
                           Suspend
                         </button>
                       ) : (
                         <button
                           onClick={() => reactivate(tenant.id)}
-                          className="px-2.5 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 rounded border border-emerald-200 transition-colors cursor-pointer"
+                          className="px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 rounded border border-emerald-200 transition-colors cursor-pointer"
                         >
                           Reactivate
                         </button>
@@ -1049,6 +1212,19 @@ ENABLE_CUSTOMER_REVIEWS=${t.theme.enableReviews}`
           </table>
         </div>
       </div>
+
+      {/* Store Owner Credentials Modal */}
+      {credentialsTenant && (
+        <StoreCredentialsModal
+          tenant={credentialsTenant}
+          isOpen={!!credentialsTenant}
+          onClose={() => setCredentialsTenant(null)}
+          onSuccess={(msg) => {
+            showToast(msg)
+            refresh()
+          }}
+        />
+      )}
 
       {/* Inspect Tenant Modal */}
       {inspectTenant && (

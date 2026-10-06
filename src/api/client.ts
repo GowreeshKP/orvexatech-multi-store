@@ -53,10 +53,14 @@ class ApiClient {
 
     const tenant = mockStore.getTenantBySlug(tenantSlug)
     if (tenant) {
-      const mockCreated = mockStore.addProduct(tenant.id, product)
-      return data || mockCreated
+      const fullProduct: Product = {
+        ...product,
+        id: product.id || Date.now(),
+      }
+      mockStore.addProduct(tenant.id, fullProduct)
+      return data || fullProduct
     }
-    return data as Product
+    return (data as Product) || (product as Product)
   }
 
   async updateProduct(tenantSlug: string, id: number, updates: Partial<Product>): Promise<Product | null> {
@@ -67,8 +71,8 @@ class ApiClient {
 
     const tenant = mockStore.getTenantBySlug(tenantSlug)
     if (tenant) {
-      const mockUpdated = mockStore.updateProduct(tenant.id, id, updates)
-      return data || mockUpdated
+      mockStore.updateProduct(tenant.id, id, updates)
+      return data || (mockStore.getProducts(tenant.id).find((p) => p.id === id) || null)
     }
     return data
   }
@@ -122,7 +126,7 @@ class ApiClient {
     })
     const tenant = mockStore.getTenantBySlug(tenantSlug)
     if (tenant) {
-      mockStore.addOrder(tenant.id, order)
+      mockStore.placeOrder(tenant.id, order)
     }
     return data || order
   }
@@ -143,7 +147,9 @@ class ApiClient {
     })
     const tenant = mockStore.getTenantBySlug(tenantSlug)
     if (tenant) {
-      return mockStore.addReview(tenant.id, review)
+      const fullReview: Review = { ...review, id: Date.now() }
+      mockStore.submitReview(tenant.id, fullReview)
+      return data || fullReview
     }
     return data as Review
   }

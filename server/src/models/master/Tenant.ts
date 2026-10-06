@@ -18,6 +18,8 @@ export interface ITenant extends Document {
   ownerEmail: string
   ownerPhone: string
   passwordHash?: string
+  passwordResetPending?: boolean
+  passwordResetRequestedAt?: string
   logo?: string
   customDomain?: string
   customMongoUri?: string // Bring-Your-Own-Database URI
@@ -62,6 +64,8 @@ export const TenantSchema = new Schema<ITenant>(
     ownerEmail: { type: String, required: true, index: true },
     ownerPhone: { type: String, default: '' },
     passwordHash: { type: String, default: '' },
+    passwordResetPending: { type: Boolean, default: false },
+    passwordResetRequestedAt: { type: String, default: '' },
     logo: { type: String, default: '' },
     customDomain: { type: String, default: '' },
     customMongoUri: { type: String, default: '' },

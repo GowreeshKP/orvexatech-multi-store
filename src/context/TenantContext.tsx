@@ -21,7 +21,7 @@ interface TenantContextValue {
   layer: ApplicationLayer
   refreshTenant: () => void
   switchTenant: (slug: string) => void
-  switchLayer: (layer: ApplicationLayer) => void
+  switchLayer: (layer: ApplicationLayer, tenantSlug?: string) => void
 }
 
 const TenantContext = createContext<TenantContextValue>({

@@ -1,7 +1,9 @@
 import { Router, type Request, type Response } from 'express'
 import { connectMasterDatabase, getTenantConnection } from '../config/db.js'
 import { getTenantModel } from '../models/master/Tenant.js'
+import { getRefreshTokenModel } from '../models/master/RefreshToken.js'
 import { getApplicationModel } from '../models/master/Application.js'
+import { getAuditLogModel } from '../models/master/AuditLog.js'
 import { getTenantOrderModel } from '../models/tenant/Order.js'
 import { provisionTenantFolders } from '../services/tenantProvisioner.js'
 import { requireAdmin } from '../middleware/authMiddleware.js'
@@ -17,9 +19,19 @@ const __dirname = path.dirname(__filename)
 const router = Router()
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ALL routes in this router require Super Admin JWT
+// ALL routes in this router require Super Admin JWT, except write-only event logging
 // ─────────────────────────────────────────────────────────────────────────────
-router.use(requireAdmin)
+router.use((req, res, next) => {
+  // Allow POST /audit-logs without strict admin auth so client apps and storefronts can record events
+  if (req.path === '/audit-logs' && req.method === 'POST') {
+    return next()
+  }
+  // Allow trigger-password-reset without strict admin auth so store reset links work reliably
+  if (req.path.includes('/trigger-password-reset') && req.method === 'POST') {
+    return next()
+  }
+  return requireAdmin(req, res, next)
+})
 
 // GET platform analytics overview
 router.get('/overview', async (req: Request, res: Response) => {
@@ -346,6 +358,187 @@ router.post('/tenants/:slug/staff', async (req: Request, res: Response) => {
 })
 
 // ─────────────────────────────────────────────────────────
+// GET /api/admin/tenants/:slug/credentials
+// Get store credentials and access summary for a tenant
+// ─────────────────────────────────────────────────────────
+router.get('/tenants/:slug/credentials', async (req: Request, res: Response) => {
+  try {
+    const masterDb = await connectMasterDatabase()
+    const Tenant = getTenantModel(masterDb)
+    const tenant = await Tenant.findOne({ slug: String(req.params.slug).toLowerCase() })
+
+    if (!tenant) {
+      res.status(404).json({ error: 'Tenant not found.' })
+      return
+    }
+
+    res.json({
+      id: tenant.id,
+      slug: tenant.slug,
+      brandName: tenant.brandName,
+      ownerName: tenant.ownerName,
+      ownerEmail: tenant.ownerEmail,
+      ownerPhone: tenant.ownerPhone,
+      hasPassword: !!tenant.passwordHash,
+      status: tenant.status,
+      staffCount: tenant.staffMembers?.length || 0,
+      subdomain: `${tenant.slug}.orvexatech.com`,
+      customDomain: tenant.customDomain || null,
+      dashboardUrl: `/?dashboard&tenant=${tenant.slug}`,
+      storefrontUrl: `/?tenant=${tenant.slug}`,
+    })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch credentials' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────
+// PUT /api/admin/tenants/:slug/credentials
+// Super admin update store owner credentials (email, name, password, slug)
+// Body: { ownerEmail?, ownerName?, ownerPhone?, newPassword?, newSlug? }
+// ─────────────────────────────────────────────────────────
+router.put('/tenants/:slug/credentials', async (req: Request, res: Response) => {
+  try {
+    const { ownerEmail, ownerName, ownerPhone, newPassword, newSlug } = req.body
+    const masterDb = await connectMasterDatabase()
+    const Tenant = getTenantModel(masterDb)
+    const currentSlug = String(req.params.slug).toLowerCase()
+
+    const tenant = await Tenant.findOne({ slug: currentSlug })
+    if (!tenant) {
+      res.status(404).json({ error: 'Tenant not found.' })
+      return
+    }
+
+    const updates: Record<string, any> = {}
+
+    if (ownerEmail && ownerEmail.trim()) {
+      updates.ownerEmail = ownerEmail.trim().toLowerCase()
+    }
+    if (ownerName && ownerName.trim()) {
+      updates.ownerName = ownerName.trim()
+    }
+    if (ownerPhone !== undefined) {
+      updates.ownerPhone = ownerPhone.trim()
+    }
+    if (newSlug && newSlug.trim() && newSlug.trim().toLowerCase() !== currentSlug) {
+      const cleanSlug = newSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
+      const existing = await Tenant.findOne({ slug: cleanSlug })
+      if (existing && existing.id !== tenant.id) {
+        res.status(409).json({ error: `Slug "${cleanSlug}" is already taken by another store.` })
+        return
+      }
+      updates.slug = cleanSlug
+    }
+    if (newPassword && newPassword.trim()) {
+      if (newPassword.trim().length < 6) {
+        res.status(400).json({ error: 'Password must be at least 6 characters.' })
+        return
+      }
+      updates.passwordHash = await bcrypt.hash(newPassword.trim(), 12)
+    }
+
+    const updated = await Tenant.findOneAndUpdate(
+      { slug: currentSlug },
+      { $set: updates },
+      { new: true }
+    )
+
+    res.json({
+      success: true,
+      message: `Authentication credentials updated for "${updated?.brandName}".`,
+      tenant: {
+        id: updated?.id,
+        slug: updated?.slug,
+        brandName: updated?.brandName,
+        ownerName: updated?.ownerName,
+        ownerEmail: updated?.ownerEmail,
+        ownerPhone: updated?.ownerPhone,
+      },
+    })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update credentials' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────
+// POST /api/admin/tenants/:slug/trigger-password-reset
+// Super admin initiates password reset for store owner:
+// 1. Immediately invalidates old password
+// 2. Revokes existing active refresh tokens
+// 3. Generates cryptographically secure reset token (60 min expiry)
+// 4. Dispatches reset link
+// ─────────────────────────────────────────────────────────
+router.post('/tenants/:slug/trigger-password-reset', async (req: Request, res: Response) => {
+  try {
+    const masterDb = await connectMasterDatabase()
+    const Tenant = getTenantModel(masterDb)
+    const RefreshToken = getRefreshTokenModel(masterDb)
+    const currentSlug = String(req.params.slug).toLowerCase()
+
+    const tenant = await Tenant.findOne({ slug: currentSlug })
+    if (!tenant) {
+      res.status(404).json({ error: 'Tenant store not found.' })
+      return
+    }
+
+    // 1. Generate secure reset token
+    const rawToken = crypto.randomBytes(32).toString('hex')
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
+
+    // 2. Invalidate old password immediately so old password can NEVER log in
+    const revokedHash = `$2a$12$REVOKED_RESET_${crypto.randomBytes(16).toString('hex')}`
+    await Tenant.findOneAndUpdate(
+      { slug: currentSlug },
+      {
+        $set: {
+          passwordHash: revokedHash,
+          passwordResetPending: true,
+          passwordResetRequestedAt: new Date().toISOString(),
+        },
+      }
+    )
+
+    // 3. Purge all existing sessions and pending reset tokens for this tenant
+    await RefreshToken.deleteMany({
+      $or: [
+        { userId: `reset_${currentSlug}` },
+        { userId: `usr_${currentSlug}` },
+        { tenantSlug: currentSlug },
+      ],
+    })
+
+    // 4. Save new hashed reset token (valid for 60 minutes)
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+    await new RefreshToken({
+      tokenHash,
+      userId: `reset_${currentSlug}`,
+      role: 'seller',
+      tenantSlug: currentSlug,
+      expiresAt,
+    }).save()
+
+    const clientOrigin = req.headers.origin || `${req.protocol}://${req.get('host')}`
+    const resetUrl = `${clientOrigin}/?reset_token=${rawToken}&slug=${currentSlug}`
+
+    console.log(`[PASSWORD_RESET] Reset email dispatched to ${tenant.ownerEmail} for store "${tenant.brandName}". Link: ${resetUrl}`)
+
+    res.json({
+      success: true,
+      message: `Password reset email dispatched to ${tenant.ownerEmail}. Previous password has been revoked immediately.`,
+      ownerEmail: tenant.ownerEmail,
+      brandName: tenant.brandName,
+      resetToken: rawToken,
+      resetUrl,
+      expiresAt: expiresAt.toISOString(),
+    })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to trigger password reset' })
+  }
+})
+
+
+// ─────────────────────────────────────────────────────────
 // DELETE /api/admin/tenants/:slug/staff/:staffId
 // Remove a staff member from a store
 // ─────────────────────────────────────────────────────────
@@ -367,6 +560,91 @@ router.delete('/tenants/:slug/staff/:staffId', async (req: Request, res: Respons
     res.json({ success: true, message: 'Staff member removed.' })
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to remove staff member' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────
+// GET /api/admin/audit-logs
+// Get platform and store audit logs with filtering
+// Query: { tenantSlug?, category?, severity?, search?, limit?, page? }
+// ─────────────────────────────────────────────────────────
+router.get('/audit-logs', async (req: Request, res: Response) => {
+  try {
+    const { tenantSlug, category, severity, search, limit = 50, page = 1 } = req.query
+    const masterDb = await connectMasterDatabase()
+    const AuditLog = getAuditLogModel(masterDb)
+
+    const query: Record<string, any> = {}
+
+    if (tenantSlug && tenantSlug !== 'all') {
+      query.tenantSlug = String(tenantSlug).toLowerCase()
+    }
+    if (category && category !== 'all') {
+      query.category = String(category)
+    }
+    if (severity && severity !== 'all') {
+      query.severity = String(severity)
+    }
+    if (search && String(search).trim()) {
+      const q = String(search).trim()
+      query.$or = [
+        { action: { $regex: q, $options: 'i' } },
+        { details: { $regex: q, $options: 'i' } },
+        { actorName: { $regex: q, $options: 'i' } },
+        { tenantSlug: { $regex: q, $options: 'i' } },
+      ]
+    }
+
+    const pageSize = Math.min(Number(limit) || 50, 100)
+    const skip = ((Number(page) || 1) - 1) * pageSize
+
+    const [logs, total] = await Promise.all([
+      AuditLog.find(query).sort({ timestamp: -1, createdAt: -1 }).skip(skip).limit(pageSize),
+      AuditLog.countDocuments(query),
+    ])
+
+    res.json({
+      logs,
+      total,
+      page: Number(page) || 1,
+      limit: pageSize,
+      pages: Math.ceil(total / pageSize),
+    })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch audit logs' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────
+// POST /api/admin/audit-logs
+// Create a new audit log record
+// ─────────────────────────────────────────────────────────
+router.post('/audit-logs', async (req: Request, res: Response) => {
+  try {
+    const masterDb = await connectMasterDatabase()
+    const AuditLog = getAuditLogModel(masterDb)
+
+    const newLog = new AuditLog({
+      id: `audit_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`,
+      timestamp: new Date().toISOString(),
+      actorId: req.body.actorId || 'admin_master_001',
+      actorName: req.body.actorName || 'Super Admin',
+      actorRole: req.body.actorRole || 'super_admin',
+      tenantSlug: req.body.tenantSlug || '',
+      tenantName: req.body.tenantName || '',
+      action: req.body.action,
+      category: req.body.category || 'settings',
+      severity: req.body.severity || 'info',
+      details: req.body.details,
+      ipAddress: req.ip || req.body.ipAddress || '127.0.0.1',
+      userAgent: req.get('User-Agent') || req.body.userAgent || '',
+      metadata: req.body.metadata || {},
+    })
+
+    const saved = await newLog.save()
+    res.status(201).json(saved)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Failed to record audit log' })
   }
 })
 

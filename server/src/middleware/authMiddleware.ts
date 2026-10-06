@@ -135,8 +135,8 @@ export function requireTenantAccess(req: Request, res: Response, next: NextFunct
 //            long-lived refresh token (30d, signed with separate secret)
 // ─────────────────────────────────────────────────────────
 
-/** Issue a short-lived access token (default 15 minutes) */
-export function signToken(payload: JwtPayload, expiresIn: string = '15m'): string {
+/** Issue an access token (default 7 days for dev and active admin sessions) */
+export function signToken(payload: JwtPayload, expiresIn: string = '7d'): string {
   return jwt.sign({ ...payload, tokenType: 'access' }, JWT_SECRET, { expiresIn } as jwt.SignOptions)
 }
 

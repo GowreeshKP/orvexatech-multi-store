@@ -1,8 +1,5 @@
-// --- Seller Portal Authentication Gateway ---
-// Login ID & Password interface for Merchant access
-
-import { useState } from 'react'
-import { authService, DEMO_SELLER_CREDENTIALS, type SellerSession } from '@/api/auth'
+import { useState, useEffect } from 'react'
+import { authService, type StoreCredentialInfo, type SellerSession } from '@/api/auth'
 import type { TenantConfig } from '@/types/tenant'
 
 interface SellerLoginProps {
@@ -11,12 +8,32 @@ interface SellerLoginProps {
 }
 
 export default function SellerLogin({ tenant, onLoginSuccess }: SellerLoginProps) {
-  const [loginId, setLoginId] = useState(tenant?.ownerEmail || 'gowreesh@thelunarclothing.com')
-  const [password, setPassword] = useState('lunar@password')
+  const [credentialsList, setCredentialsList] = useState<StoreCredentialInfo[]>(() =>
+    authService.getStoreCredentialsList()
+  )
+
+  const initialCred = tenant
+    ? authService.getStoreCredential(tenant.slug)
+    : credentialsList[0] || { loginId: 'gowreesh@thelunarclothing.com', password: 'lunar@password' }
+
+  const [loginId, setLoginId] = useState(initialCred.loginId)
+  const [password, setPassword] = useState(initialCred.password)
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [rememberMe, setRememberMe] = useState(true)
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setCredentialsList(authService.getStoreCredentialsList())
+    }
+    window.addEventListener('orvexa:credentials-updated', handleUpdate)
+    window.addEventListener('orvexa:store-updated', handleUpdate)
+    return () => {
+      window.removeEventListener('orvexa:credentials-updated', handleUpdate)
+      window.removeEventListener('orvexa:store-updated', handleUpdate)
+    }
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,7 +58,7 @@ export default function SellerLogin({ tenant, onLoginSuccess }: SellerLoginProps
     }
   }
 
-  const handleSelectDemo = (demo: (typeof DEMO_SELLER_CREDENTIALS)[number]) => {
+  const handleSelectDemo = (demo: StoreCredentialInfo) => {
     setLoginId(demo.loginId)
     setPassword(demo.password)
     setError(null)
@@ -81,14 +98,14 @@ export default function SellerLogin({ tenant, onLoginSuccess }: SellerLoginProps
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wider text-white/70 mb-1.5">
-              Merchant Login ID / Email
+              Merchant Login ID / Email or Subdomain
             </label>
             <div className="relative">
               <input
                 type="text"
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
-                placeholder="e.g. gowreesh@thelunarclothing.com"
+                placeholder="e.g. gowreesh@thelunarclothing.com or lunar"
                 className="w-full bg-black/50 border border-white/15 focus:border-amber-400/80 rounded-xl px-4 py-3 text-xs text-white placeholder-white/25 outline-none transition-all"
                 required
               />
@@ -155,18 +172,18 @@ export default function SellerLogin({ tenant, onLoginSuccess }: SellerLoginProps
         <div className="mt-8 pt-6 border-t border-white/10">
           <div className="flex items-center justify-between mb-3">
             <p className="text-[10px] font-bold uppercase tracking-wider text-white/50">
-              Demo Merchant Accounts
+              Active Store Accounts
             </p>
             <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded-full text-white/70">1-Click Fill</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            {DEMO_SELLER_CREDENTIALS.map((demo) => (
+            {credentialsList.slice(0, 6).map((demo) => (
               <button
                 key={demo.tenantSlug}
                 type="button"
                 onClick={() => handleSelectDemo(demo)}
                 className={`text-left p-2.5 rounded-xl border text-[11px] transition-all cursor-pointer ${
-                  loginId === demo.loginId
+                  loginId === demo.loginId || loginId === demo.tenantSlug
                     ? 'bg-amber-400/15 border-amber-400/50 text-white shadow-xs'
                     : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10 hover:text-white'
                 }`}

@@ -326,6 +326,162 @@ class MockPlatformStore {
     return newTenant
   }
 
+  provisionTenant(input: {
+    brandName: string
+    slug: string
+    ownerName: string
+    ownerEmail: string
+    ownerPhone?: string
+    plan?: 'starter' | 'pro' | 'enterprise'
+    niche?: string
+    primaryColor?: string
+    accentColor?: string
+    customDomain?: string
+  }): TenantConfig {
+    const cleanSlug = input.slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '') || 'store'
+    const tenantId = `tenant_${cleanSlug}`
+
+    const primaryColor = input.primaryColor || '#1e3a8a'
+    const accentColor = input.accentColor || '#3b82f6'
+
+    const newTenant: TenantConfig = {
+      id: tenantId,
+      slug: cleanSlug,
+      brandName: input.brandName.trim(),
+      ownerName: input.ownerName.trim(),
+      ownerEmail: input.ownerEmail.trim().toLowerCase(),
+      ownerPhone: input.ownerPhone || '',
+      logo: '',
+      customDomain: input.customDomain || '',
+      status: 'active',
+      plan: input.plan || 'starter',
+      createdAt: new Date().toISOString().split('T')[0],
+      theme: {
+        primaryColor,
+        accentColor,
+        backgroundColor: '#FAFAF8',
+        fontDisplay: "'Instrument Serif', Georgia, serif",
+        fontSans: "'Work Sans', system-ui, sans-serif",
+        heroImage: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
+        logoUrl: '',
+        announcementMessages: [
+          `${input.brandName.toUpperCase()} • OFFICIAL STOREFRONT`,
+          'FREE DOMESTIC SHIPPING ACROSS INDIA',
+          `USE CODE ${cleanSlug.toUpperCase()}10 AT CHECKOUT`,
+        ],
+        enableAnimations: true,
+        enableReviews: true,
+        enableOrderTracking: true,
+      },
+      subscription: {
+        plan: input.plan || 'starter',
+        pricePerMonth: input.plan === 'enterprise' ? 4999 : input.plan === 'pro' ? 2499 : 999,
+        status: 'active',
+        trialEndsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        paymentMethod: 'manual',
+        invoices: [],
+      },
+    }
+
+    this.tenants.set(tenantId, newTenant)
+
+    // Seed tailored catalog products for this store's isolated database
+    this.tenantDatabases.set(tenantId, {
+      products: [
+        {
+          id: 501,
+          name: `${input.brandName} Signature Collection Maxi`,
+          category: 'maxis',
+          sculptLevel: 'HERITAGE WEAVE',
+          fabricTech: '100% Breathable Pure Cotton',
+          fabricDesc: `Artisanal masterpiece created with precision tailoring, flowing silhouette, and side utility pockets for ${input.brandName}.`,
+          compression: 'Flowing Silhouette',
+          price: 1899,
+          priceFormatted: '₹1,899',
+          rating: 4.9,
+          reviewsCount: 22,
+          badge: 'Bestseller',
+          colors: [
+            { name: 'Warm Terracotta', hex: '#E07A5F' },
+            { name: 'Ivory Cream', hex: '#FFF8DC' },
+          ],
+          sizes: ['S', 'M', 'L', 'XL', 'XXL'],
+          imgMain: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
+          images: [
+            'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
+            'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5205.jpg?v=1778607246',
+          ],
+          desc: `Exclusively created for ${input.brandName}. Soft, breathable, handcrafted with deep functional utility pockets.`,
+          details: [
+            `Authentic ${input.niche || 'Fashion'} collection`,
+            '100% Premium Pure Yarn',
+            'Side waist tie-up ropes with functional pockets',
+          ],
+          fitInfo: 'True to size with flowing maxi drape.',
+        },
+        {
+          id: 502,
+          name: `${input.brandName} Handcrafted Artisan Ensemble`,
+          category: 'dresses',
+          sculptLevel: 'FESTIVE WEAVE',
+          fabricTech: 'Natural Botanical Handloom',
+          fabricDesc: 'Lightweight festive drape woven by skilled master weavers.',
+          compression: 'Festive Fit',
+          price: 2499,
+          priceFormatted: '₹2,499',
+          rating: 5.0,
+          reviewsCount: 15,
+          badge: 'Trending',
+          colors: [
+            { name: 'Indigo Blue', hex: '#3D5A80' },
+            { name: 'Sage Green', hex: '#2E8B57' },
+          ],
+          sizes: ['S', 'M', 'L', 'XL'],
+          imgMain: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5234.jpg?v=1778607246',
+          images: [
+            'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5234.jpg?v=1778607246',
+          ],
+          desc: `Handloom celebration piece from ${input.brandName}.`,
+          details: ['Matching inner lining included', 'Hand-finished hemline'],
+          fitInfo: 'Flared regular fit.',
+        },
+      ],
+      reviews: [
+        {
+          id: 501,
+          productId: 501,
+          author: 'Pooja R.',
+          rating: 5,
+          date: 'Just now',
+          title: `Exceptional craftsmanship from ${input.brandName}`,
+          comment: 'The fabric feels so luxurious and the fit is stunning. Fast shipping too!',
+          verified: true,
+        },
+      ],
+      orders: [],
+      customers: [
+        {
+          id: 'cust_01',
+          name: input.ownerName,
+          email: input.ownerEmail,
+          phone: input.ownerPhone || '',
+          ordersCount: 1,
+          totalSpent: 1899,
+          joinedDate: new Date().toISOString().split('T')[0],
+        },
+      ],
+    })
+
+    this.persist()
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('orvexa:tenant-provisioned', { detail: newTenant }))
+    }
+
+    return newTenant
+  }
+
   submitApplication(appData: {
     brandName: string
     ownerName: string
@@ -484,6 +640,32 @@ class MockPlatformStore {
   placeOrder(tenantId: string, order: TrackedOrder): void {
     this.getDB(tenantId).orders.unshift(order)
     this.persist()
+  }
+
+  updateOrderStatus(tenantId: string, orderId: string, status: TrackedOrder['status'], courier?: string, awb?: string): void {
+    const db = this.getDB(tenantId)
+    const order = db.orders.find((o) => o.id === orderId)
+    if (order) {
+      order.status = status
+      if (courier) order.courier = courier
+      if (awb) order.awb = awb
+      
+      // Update timeline
+      const statusTitle = 
+        status === 'In Transit' ? 'Dispatched with Blue Dart Express' :
+        status === 'Out for Delivery' ? 'Out for Delivery with Courier Agent' :
+        status === 'Delivered' ? 'Delivered to Customer Doorstep' :
+        'Order Confirmed & Processing'
+
+      order.timeline.push({
+        title: statusTitle,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        desc: `Status updated to ${status} by fulfillment team.`,
+        completed: true,
+        current: true,
+      })
+      this.persist()
+    }
   }
 
   // Reviews

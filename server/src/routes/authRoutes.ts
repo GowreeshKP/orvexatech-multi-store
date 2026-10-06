@@ -57,6 +57,161 @@ async function issueTokenPair(
 }
 
 // ─────────────────────────────────────────────────────────
+// POST /api/auth/login (Unified Common Login Endpoint)
+// Auto-detects Super Admin, Merchant, or Store Staff
+// ─────────────────────────────────────────────────────────
+router.post('/login', async (req: Request, res: Response) => {
+  try {
+    const { loginId, password } = req.body
+
+    if (!loginId || !password) {
+      res.status(400).json({ error: 'Please enter your Email or Login ID and password.' })
+      return
+    }
+
+    const cleanId = loginId.trim().toLowerCase()
+    const cleanPass = password.trim()
+
+    const masterDb = await connectMasterDatabase()
+
+    // 1. Check Super Admin User
+    const AdminUser = getAdminUserModel(masterDb)
+    const adminUser = await AdminUser.findOne({
+      $or: [{ email: cleanId }, { id: cleanId }],
+    })
+
+    if (adminUser) {
+      const isValidAdmin = await bcrypt.compare(cleanPass, adminUser.passwordHash)
+      if (isValidAdmin) {
+        await AdminUser.findOneAndUpdate({ _id: adminUser._id }, { $set: { lastLogin: new Date().toISOString() } })
+        const { accessToken, refreshToken } = await issueTokenPair(masterDb, {
+          userId: adminUser.id,
+          email: adminUser.email,
+          role: 'super_admin',
+        })
+        res.json({
+          success: true,
+          accessToken,
+          refreshToken,
+          expiresIn: 604800,
+          session: {
+            userId: adminUser.id,
+            name: adminUser.name,
+            email: adminUser.email,
+            role: 'super_admin',
+            loginTime: new Date().toISOString(),
+          },
+        })
+        return
+      }
+    }
+
+    // 2. Check Merchant / Tenant Store Owner
+    const Tenant = getTenantModel(masterDb)
+    const tenant = await Tenant.findOne({
+      $or: [{ ownerEmail: cleanId }, { slug: cleanId }],
+    })
+
+    if (tenant) {
+      if (tenant.status === 'suspended') {
+        res.status(403).json({ error: 'Your store has been suspended. Please contact support.' })
+        return
+      }
+      if (tenant.status === 'pending') {
+        res.status(403).json({ error: 'Your store application is still under review.' })
+        return
+      }
+
+      if ((tenant as any).passwordResetPending || tenant.passwordHash?.startsWith('$2a$12$REVOKED_')) {
+        res.status(401).json({
+          error: `Your password was reset by an administrator. Please check your email (${tenant.ownerEmail}) and use the reset link to create a new password.`,
+          passwordResetPending: true,
+        })
+        return
+      }
+
+      if (tenant.passwordHash) {
+        const isValidTenant = await bcrypt.compare(cleanPass, tenant.passwordHash)
+        if (isValidTenant) {
+          const userId = `usr_${tenant.slug}`
+          const { accessToken, refreshToken } = await issueTokenPair(masterDb, {
+            userId,
+            email: tenant.ownerEmail,
+            role: 'seller',
+            tenantId: tenant.id,
+            tenantSlug: tenant.slug,
+            brandName: tenant.brandName,
+          })
+          res.json({
+            success: true,
+            accessToken,
+            refreshToken,
+            expiresIn: 604800,
+            session: {
+              userId,
+              name: tenant.ownerName || 'Merchant',
+              email: tenant.ownerEmail,
+              role: 'seller',
+              tenantId: tenant.id,
+              tenantSlug: tenant.slug,
+              brandName: tenant.brandName,
+              loginTime: new Date().toISOString(),
+            },
+          })
+          return
+        }
+      }
+    }
+
+    // 3. Check Per-Store Staff Members
+    const tenantWithStaff = await Tenant.findOne({
+      'staffMembers.email': cleanId,
+    })
+
+    if (tenantWithStaff && tenantWithStaff.status === 'active') {
+      const staffMember = tenantWithStaff.staffMembers.find(
+        (s) => s.email.toLowerCase() === cleanId
+      )
+      if (staffMember) {
+        const isValidStaff = await bcrypt.compare(cleanPass, staffMember.passwordHash)
+        if (isValidStaff) {
+          const { accessToken, refreshToken } = await issueTokenPair(masterDb, {
+            userId: staffMember.id,
+            email: staffMember.email,
+            role: 'staff',
+            tenantId: tenantWithStaff.id,
+            tenantSlug: tenantWithStaff.slug,
+            brandName: tenantWithStaff.brandName,
+          })
+          res.json({
+            success: true,
+            accessToken,
+            refreshToken,
+            expiresIn: 604800,
+            session: {
+              userId: staffMember.id,
+              name: staffMember.name,
+              email: staffMember.email,
+              role: 'staff',
+              staffRole: staffMember.role,
+              tenantId: tenantWithStaff.id,
+              tenantSlug: tenantWithStaff.slug,
+              brandName: tenantWithStaff.brandName,
+              loginTime: new Date().toISOString(),
+            },
+          })
+          return
+        }
+      }
+    }
+
+    res.status(401).json({ error: 'Invalid login credentials. Please check your email or password.' })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Authentication error' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────
 // POST /api/auth/seller/login
 // Merchant login — verifies bcrypt password, issues dual JWT
 // ─────────────────────────────────────────────────────────
@@ -93,6 +248,14 @@ router.post('/seller/login', async (req: Request, res: Response) => {
       return
     }
 
+    if ((tenant as any).passwordResetPending || tenant.passwordHash?.startsWith('$2a$12$REVOKED_')) {
+      res.status(401).json({
+        error: `Your password was reset by an administrator. Please check your email (${tenant.ownerEmail}) and use the reset link to create a new password.`,
+        passwordResetPending: true,
+      })
+      return
+    }
+
     if (!tenant.passwordHash) {
       res.status(401).json({ error: 'Account password not configured. Please contact your platform admin.' })
       return
@@ -118,7 +281,7 @@ router.post('/seller/login', async (req: Request, res: Response) => {
       success: true,
       accessToken,
       refreshToken,
-      expiresIn: 900, // 15 minutes in seconds
+      expiresIn: 604800, // 7 days in seconds
       session: {
         userId,
         name: tenant.ownerName || 'Merchant',
@@ -180,7 +343,7 @@ router.post('/admin/login', async (req: Request, res: Response) => {
       success: true,
       accessToken,
       refreshToken,
-      expiresIn: 900,
+      expiresIn: 604800,
       session: {
         userId: adminUser.id,
         name: adminUser.name,
@@ -250,7 +413,7 @@ router.post('/staff/login', async (req: Request, res: Response) => {
       success: true,
       accessToken,
       refreshToken,
-      expiresIn: 900,
+      expiresIn: 604800,
       session: {
         userId: staffMember.id,
         name: staffMember.name,
@@ -321,7 +484,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
       success: true,
       accessToken,
       refreshToken: newRefreshToken,
-      expiresIn: 900,
+      expiresIn: 604800,
     })
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Token refresh failed' })
@@ -450,12 +613,12 @@ router.post('/seller/reset-password', async (req: Request, res: Response) => {
       return
     }
 
-    // Apply new password
+    // Apply new password and clear revoked reset state
     const Tenant = getTenantModel(masterDb)
     const hash = await bcrypt.hash(newPassword, 12)
     await Tenant.findOneAndUpdate(
       { slug: stored.tenantSlug },
-      { $set: { passwordHash: hash } }
+      { $set: { passwordHash: hash, passwordResetPending: false, passwordResetRequestedAt: '' } }
     )
 
     // Invalidate reset token and all active refresh tokens for this user
@@ -502,6 +665,47 @@ router.post('/seller/set-password', async (req: Request, res: Response) => {
     res.json({ success: true, message: `Password set for store "${tenant.brandName}".` })
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to set password' })
+  }
+})
+
+// ─────────────────────────────────────────────────────────
+// POST /api/auth/seller/change-password
+// Self-service password change for store owners
+// Requires: { slug, currentPassword, newPassword }
+// ─────────────────────────────────────────────────────────
+router.post('/seller/change-password', async (req: Request, res: Response) => {
+  try {
+    const { slug, currentPassword, newPassword } = req.body
+
+    if (!slug || !newPassword || newPassword.length < 8) {
+      res.status(400).json({ error: 'Store identifier and newPassword (min 8 chars) are required.' })
+      return
+    }
+
+    const masterDb = await connectMasterDatabase()
+    const Tenant = getTenantModel(masterDb)
+    const tenant = await Tenant.findOne({ slug: slug.toLowerCase() })
+
+    if (!tenant) {
+      res.status(404).json({ error: `Tenant "${slug}" not found.` })
+      return
+    }
+
+    // If current password is provided and store has passwordHash, verify it
+    if (tenant.passwordHash && currentPassword) {
+      const isValid = await bcrypt.compare(currentPassword.trim(), tenant.passwordHash)
+      if (!isValid) {
+        res.status(401).json({ error: 'Current password does not match.' })
+        return
+      }
+    }
+
+    const hash = await bcrypt.hash(newPassword, 12)
+    await Tenant.findOneAndUpdate({ slug: tenant.slug }, { $set: { passwordHash: hash } })
+
+    res.json({ success: true, message: `Password successfully updated for ${tenant.brandName}.` })
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update password' })
   }
 })
 

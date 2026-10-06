@@ -9,6 +9,7 @@ export interface Product {
   fabricDesc: string
   compression: string
   price: number
+  originalPrice?: number
   priceFormatted: string
   rating: number
   reviewsCount: number

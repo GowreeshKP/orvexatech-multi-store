@@ -191,7 +191,16 @@ export interface TenantDatabase {
   products: Product[]
   reviews: Review[]
   orders: TrackedOrder[]
-  customers: { name: string; email: string; phone: string; orderCount: number; totalSpent: number }[]
+  customers: {
+    id?: string
+    name: string
+    email: string
+    phone: string
+    orderCount?: number
+    ordersCount?: number
+    totalSpent: number
+    joinedDate?: string
+  }[]
 }
 
 // Lunar Clothing's isolated database

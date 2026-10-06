@@ -46,24 +46,40 @@ export function useTenantReviews(): { reviews: Review[]; addReview: (r: Review) 
   return { reviews, addReview }
 }
 
-export function useTenantOrders(): { orders: TrackedOrder[]; placeOrder: (o: TrackedOrder) => void } {
+export function useTenantOrders(): {
+  orders: TrackedOrder[]
+  placeOrder: (o: TrackedOrder) => void
+  updateOrderStatus: (orderId: string, status: TrackedOrder['status'], courier?: string, awb?: string) => void
+  refresh: () => void
+} {
   const { tenant } = useTenant()
   const [orders, setOrders] = useState<TrackedOrder[]>([])
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     if (tenant) {
-      setOrders(mockStore.getOrders(tenant.id))
+      setOrders([...mockStore.getOrders(tenant.id)])
     }
   }, [tenant])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
 
   const placeOrder = useCallback((order: TrackedOrder) => {
     if (tenant) {
       mockStore.placeOrder(tenant.id, order)
-      setOrders(mockStore.getOrders(tenant.id))
+      refresh()
     }
-  }, [tenant])
+  }, [tenant, refresh])
 
-  return { orders, placeOrder }
+  const updateOrderStatus = useCallback((orderId: string, status: TrackedOrder['status'], courier?: string, awb?: string) => {
+    if (tenant) {
+      mockStore.updateOrderStatus(tenant.id, orderId, status, courier, awb)
+      refresh()
+    }
+  }, [tenant, refresh])
+
+  return { orders, placeOrder, updateOrderStatus, refresh }
 }
 
 // =================================================================
@@ -168,6 +184,18 @@ export function useAdminTenants(): {
   suspend: (id: string) => void
   reactivate: (id: string) => void
   changePlan: (id: string, plan: 'starter' | 'pro' | 'enterprise') => void
+  provisionTenant: (data: {
+    brandName: string
+    slug: string
+    ownerName: string
+    ownerEmail: string
+    ownerPhone?: string
+    plan?: 'starter' | 'pro' | 'enterprise'
+    niche?: string
+    primaryColor?: string
+    accentColor?: string
+    customDomain?: string
+  }) => Promise<TenantConfig>
   refresh: () => void
 } {
   const [tenants, setTenants] = useState<TenantConfig[]>([])
@@ -195,7 +223,53 @@ export function useAdminTenants(): {
     refresh()
   }, [refresh])
 
-  return { tenants, suspend, reactivate, changePlan, refresh }
+  const provisionTenant = useCallback(
+    async (data: {
+      brandName: string
+      slug: string
+      ownerName: string
+      ownerEmail: string
+      ownerPhone?: string
+      plan?: 'starter' | 'pro' | 'enterprise'
+      niche?: string
+      primaryColor?: string
+      accentColor?: string
+      customDomain?: string
+    }): Promise<TenantConfig> => {
+      const cleanSlug = data.slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+      const token = typeof window !== 'undefined' ? localStorage.getItem('lunar_admin_token') : null
+
+      try {
+        await fetch(`${API_BASE}/admin/tenants`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            id: `tenant_${cleanSlug}`,
+            slug: cleanSlug,
+            brandName: data.brandName,
+            ownerName: data.ownerName,
+            ownerEmail: data.ownerEmail,
+            ownerPhone: data.ownerPhone || '',
+            plan: data.plan || 'starter',
+            customDomain: data.customDomain || '',
+          }),
+        })
+      } catch (err) {
+        console.warn('Backend tenant create offline, using mock store:', err)
+      }
+
+      const created = mockStore.provisionTenant(data)
+      refresh()
+      return created
+    },
+    [refresh]
+  )
+
+  return { tenants, suspend, reactivate, changePlan, provisionTenant, refresh }
 }
 
 export function useAdminApplications(): {
