@@ -9,7 +9,7 @@ import { mockStore } from '@/api/mock-store'
 import { LegalComplianceModal, ComplianceFooterLinks, type ComplianceDocType } from '../compliance/LegalComplianceModal'
 
 interface PlatformWebsiteProps {
-  onOpenAdminLogin: () => void
+  onOpenAdminLogin?: () => void
   onOpenAdminConsole?: () => void
   isSuperAdminLoggedIn?: boolean
 }
