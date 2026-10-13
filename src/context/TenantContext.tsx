@@ -1,15 +1,17 @@
 // --- Multi-Tenant Context Provider ---
-// Provides tenant configuration to the entire component tree
-// and dynamically injects CSS variables for theming
+// Layer comes from the URL. Tenant config is loaded from the backend (demo fallback locally).
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import type { TenantConfig } from '@/types/tenant'
-import { resolveTenantSlug, resolveApplicationLayer, type ApplicationLayer } from '@/lib/tenant-resolver'
+import {
+  resolveTenantSlug,
+  resolveApplicationLayer,
+  locationForLayer,
+  type ApplicationLayer,
+} from '@/lib/tenant-resolver'
 import { mockStore } from '@/api/mock-store'
-import { MOCK_TENANTS } from '@/data/mock-tenants'
-import { useAuth } from '@/context/AuthContext'
+import { DEMO_MODE } from '@/api/auth'
 
-// Deep-clone a tenant config so React detects nested theme changes
 function deepCloneTenant(config: TenantConfig): TenantConfig {
   return JSON.parse(JSON.stringify(config))
 }
@@ -19,7 +21,7 @@ interface TenantContextValue {
   loading: boolean
   error: string | null
   layer: ApplicationLayer
-  refreshTenant: () => void
+  refreshTenant: (slug?: string) => void
   switchTenant: (slug: string) => void
   switchLayer: (layer: ApplicationLayer, tenantSlug?: string) => void
 }
@@ -46,54 +48,73 @@ export function useSwitchLayer() {
   return useContext(TenantContext).switchLayer
 }
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+
+async function fetchPublicTenant(slug: string): Promise<TenantConfig | null> {
+  if (!slug) return null
+  const looksLikeHost = slug.includes('.')
+  const qs = looksLikeHost ? `host=${encodeURIComponent(slug)}` : `slug=${encodeURIComponent(slug)}`
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 4000)
+  try {
+    const res = await fetch(`${API_BASE}/public/resolve?${qs}`, { signal: ctrl.signal })
+    if (!res.ok) return null
+    return (await res.json()) as TenantConfig
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export function TenantProvider({ children }: { children: ReactNode }) {
-  const auth = useAuth()
   const [tenant, setTenant] = useState<TenantConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  // Derive layer from auth role when authenticated; fall back to URL detection otherwise
-  const deriveLayer = useCallback((): ApplicationLayer => {
-    if (auth.isAuthenticated && auth.session?.role) {
-      if (auth.session.role === 'super_admin') return 'admin'
-      if (auth.session.role === 'seller' || auth.session.role === 'staff') return 'dashboard'
-    }
-    return resolveApplicationLayer()
-  }, [auth.isAuthenticated, auth.session?.role])
-
   const [layer, setLayer] = useState<ApplicationLayer>(() => resolveApplicationLayer())
 
-  // Re-derive layer whenever auth state changes
-  useEffect(() => {
-    setLayer(deriveLayer())
-  }, [deriveLayer])
+  const loadTenant = useCallback(async (customSlug?: string) => {
+    const currentLayer = resolveApplicationLayer()
+    setLayer(currentLayer)
+    const slug = customSlug || resolveTenantSlug()
 
-  const loadTenant = useCallback((customSlug?: string) => {
+    if (currentLayer === 'admin' && !slug) {
+      setTenant(null)
+      setError(null)
+      setLoading(false)
+      return
+    }
+
+    if (!slug) {
+      setTenant(null)
+      setError(currentLayer === 'admin' ? null : 'No store in this address.')
+      setLoading(false)
+      return
+    }
+
+    setLoading(true)
     try {
-      // Reload any localStorage updates into mockStore first
-      mockStore.reloadFromStorage()
-
-      const currentLayer = resolveApplicationLayer()
-      setLayer(currentLayer)
-
-      const slug = customSlug || resolveTenantSlug()
-      const config = mockStore.getTenantBySlug(slug)
-
-      if (config) {
-        // Deep-clone so nested theme object changes are detected by React
-        setTenant(deepCloneTenant(config))
+      const fromApi = await fetchPublicTenant(slug)
+      if (fromApi?.slug) {
+        setTenant(deepCloneTenant(fromApi))
         setError(null)
-      } else {
-        // If exact slug not found, fallback to lunar
-        const fallback = mockStore.getTenantBySlug('lunar') || MOCK_TENANTS[0]
-        if (fallback) {
-          setTenant(deepCloneTenant(fallback))
+        return
+      }
+
+      if (DEMO_MODE) {
+        mockStore.reloadFromStorage()
+        const local = mockStore.getTenantBySlug(slug) || (slug.includes('.') ? mockStore.getTenantByDomain?.(slug) : null)
+        if (local) {
+          setTenant(deepCloneTenant(local))
           setError(null)
-        } else {
-          setError(`Store "${slug}" not found.`)
+          return
         }
       }
+
+      setTenant(null)
+      setError(`Store "${slug}" not found.`)
     } catch (e) {
+      setTenant(null)
       setError('Failed to load store configuration.')
       console.error(e)
     } finally {
@@ -102,53 +123,29 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshTenant = useCallback((customSlug?: string) => {
-    loadTenant(customSlug)
+    void loadTenant(customSlug)
   }, [loadTenant])
 
   const switchTenant = (slug: string) => {
-    const url = new URL(window.location.href)
-    url.searchParams.set('tenant', slug)
-    window.history.pushState({}, '', url.toString())
-    loadTenant(slug)
+    window.history.pushState({}, '', locationForLayer('storefront', slug))
+    void loadTenant(slug)
   }
 
   const switchLayer = (newLayer: ApplicationLayer, tenantSlug?: string) => {
-    const url = new URL(window.location.href)
-    if (newLayer === 'storefront') {
-      url.searchParams.delete('panel')
-      url.searchParams.delete('admin')
-      url.searchParams.delete('layer')
-      url.searchParams.delete('seller')
-      const targetSlug = tenantSlug || tenant?.slug || 'lunar'
-      url.searchParams.set('tenant', targetSlug)
-      if (url.pathname === '/admin' || url.pathname === '/dashboard' || url.pathname === '/seller') {
-        url.pathname = '/'
-      }
-      window.history.pushState({}, '', url.toString())
-      loadTenant(targetSlug)
-    } else if (newLayer === 'dashboard') {
-      url.searchParams.set('panel', 'dashboard')
-      if (tenantSlug) url.searchParams.set('tenant', tenantSlug)
-      window.history.pushState({}, '', url.toString())
-      loadTenant(tenantSlug)
-    } else {
-      url.searchParams.delete('tenant')
-      url.searchParams.delete('store')
-      url.searchParams.set('panel', 'admin')
-      window.history.pushState({}, '', url.toString())
-    }
+    const targetSlug = tenantSlug || tenant?.slug || resolveTenantSlug()
+    window.history.pushState({}, '', locationForLayer(newLayer, targetSlug || undefined))
     setLayer(newLayer)
+    if (newLayer !== 'admin') void loadTenant(targetSlug)
   }
 
   useEffect(() => {
-    loadTenant()
+    void loadTenant()
 
     const handleLocationChange = () => {
-      loadTenant()
+      void loadTenant()
     }
-
     const handleStoreUpdated = () => {
-      loadTenant()
+      void loadTenant()
     }
 
     window.addEventListener('popstate', handleLocationChange)
@@ -162,21 +159,21 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     }
   }, [loadTenant])
 
-  // Inject CSS variables into :root based on tenant theme
   useEffect(() => {
     if (!tenant) return
 
     const root = document.documentElement
     const t = tenant.theme
+    if (t) {
+      root.style.setProperty('--brand-primary', t.primaryColor)
+      root.style.setProperty('--brand-accent', t.accentColor)
+      root.style.setProperty('--brand-bg', t.backgroundColor)
+      root.style.setProperty('--brand-font-display', t.fontDisplay)
+      root.style.setProperty('--brand-font-sans', t.fontSans)
+    }
 
-    root.style.setProperty('--brand-primary', t.primaryColor)
-    root.style.setProperty('--brand-accent', t.accentColor)
-    root.style.setProperty('--brand-bg', t.backgroundColor)
-    root.style.setProperty('--brand-font-display', t.fontDisplay)
-    root.style.setProperty('--brand-font-sans', t.fontSans)
-
-    // Update document title
-    document.title = `${tenant.brandName} | Official Online Store`
+    if (layer === 'storefront') document.title = `${tenant.brandName} | Official Online Store`
+    else if (layer === 'dashboard') document.title = `${tenant.brandName} | Seller Portal`
 
     return () => {
       root.style.removeProperty('--brand-primary')
@@ -185,7 +182,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       root.style.removeProperty('--brand-font-display')
       root.style.removeProperty('--brand-font-sans')
     }
-  }, [tenant])
+  }, [tenant, layer])
 
   return (
     <TenantContext.Provider

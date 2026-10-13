@@ -4,6 +4,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useTenant } from '@/context/TenantContext'
 import { mockStore } from '@/api/mock-store'
+import { authService } from '@/api/auth'
+import { createStoreFolder } from '@/tenants/scaffold'
 import type { Product, Review, TrackedOrder } from '@/types'
 import type { TenantConfig, TenantApplication, PlatformStats, DashboardStats, ThemeConfig } from '@/types/tenant'
 
@@ -56,9 +58,18 @@ export function useTenantOrders(): {
   const [orders, setOrders] = useState<TrackedOrder[]>([])
 
   const refresh = useCallback(() => {
-    if (tenant) {
-      setOrders([...mockStore.getOrders(tenant.id)])
-    }
+    if (!tenant) return
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+    const token = authService.getSellerToken()
+    fetch(`${API_BASE}/stores/${encodeURIComponent(tenant.slug)}/orders`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (Array.isArray(data)) setOrders(data)
+        else setOrders([...mockStore.getOrders(tenant.id)])
+      })
+      .catch(() => setOrders([...mockStore.getOrders(tenant.id)]))
   }, [tenant])
 
   useEffect(() => {
@@ -73,10 +84,19 @@ export function useTenantOrders(): {
   }, [tenant, refresh])
 
   const updateOrderStatus = useCallback((orderId: string, status: TrackedOrder['status'], courier?: string, awb?: string) => {
-    if (tenant) {
-      mockStore.updateOrderStatus(tenant.id, orderId, status, courier, awb)
-      refresh()
-    }
+    if (!tenant) return
+    mockStore.updateOrderStatus(tenant.id, orderId, status, courier, awb)
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+    const token = authService.getSellerToken()
+    fetch(`${API_BASE}/stores/${encodeURIComponent(tenant.slug)}/orders/${encodeURIComponent(orderId)}/status`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ status, courier, awb }),
+    }).catch(() => undefined)
+    refresh()
   }, [tenant, refresh])
 
   return { orders, placeOrder, updateOrderStatus, refresh }
@@ -192,6 +212,8 @@ export function useAdminTenants(): {
     ownerPhone?: string
     plan?: 'starter' | 'pro' | 'enterprise'
     niche?: string
+    storeType?: string
+    categories?: string[]
     primaryColor?: string
     accentColor?: string
     customDomain?: string
@@ -206,6 +228,8 @@ export function useAdminTenants(): {
 
   useEffect(() => {
     refresh()
+    window.addEventListener('orvexa:tenant-provisioned', refresh)
+    return () => window.removeEventListener('orvexa:tenant-provisioned', refresh)
   }, [refresh])
 
   const suspend = useCallback((id: string) => {
@@ -232,6 +256,8 @@ export function useAdminTenants(): {
       ownerPhone?: string
       plan?: 'starter' | 'pro' | 'enterprise'
       niche?: string
+      storeType?: string
+      categories?: string[]
       primaryColor?: string
       accentColor?: string
       customDomain?: string
@@ -256,6 +282,9 @@ export function useAdminTenants(): {
             ownerPhone: data.ownerPhone || '',
             plan: data.plan || 'starter',
             customDomain: data.customDomain || '',
+            niche: data.niche || '',
+            storeType: data.storeType || '',
+            categories: data.categories || [],
           }),
         })
       } catch (err) {
@@ -263,6 +292,7 @@ export function useAdminTenants(): {
       }
 
       const created = mockStore.provisionTenant(data)
+      await createStoreFolder(created.slug, created.brandName)
       refresh()
       return created
     },
@@ -272,16 +302,97 @@ export function useAdminTenants(): {
   return { tenants, suspend, reactivate, changePlan, provisionTenant, refresh }
 }
 
+const ADMIN_API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+
+// Shape of an Application document returned by GET /api/admin/applications.
+interface BackendApplication {
+  id: string
+  channel?: 'admin' | 'website'
+  brandName: string
+  ownerName?: string
+  ownerEmail: string
+  ownerPhone?: string
+  category?: string
+  storeType?: string
+  categories?: string[]
+  description?: string
+  requestedSubdomain: string
+  status: TenantApplication['status']
+  submittedAt?: string
+  createdAt?: string
+  requestedPlan?: TenantApplication['requestedPlan']
+  launch?: TenantApplication['launch']
+  migration?: TenantApplication['migration']
+  consents?: TenantApplication['consents']
+  attribution?: TenantApplication['attribution']
+  slugCheck?: TenantApplication['slugCheck']
+}
+
+function fromBackendApplication(a: BackendApplication): TenantApplication {
+  return {
+    id: a.id,
+    brandName: a.brandName,
+    ownerName: a.ownerName || '',
+    ownerEmail: a.ownerEmail,
+    phone: a.ownerPhone || '',
+    niche: a.category || '',
+    storeType: a.storeType || undefined,
+    categories: a.categories,
+    requestedSlug: a.requestedSubdomain,
+    message: a.description || '',
+    submittedAt: (a.submittedAt || a.createdAt || '').slice(0, 10),
+    status: a.status,
+    channel: a.channel,
+    requestedPlan: a.requestedPlan,
+    launch: a.launch,
+    migration: a.migration,
+    consents: a.consents && {
+      marketing: a.consents.marketing,
+      termsAcceptedAt: a.consents.termsAcceptedAt,
+      termsVersion: a.consents.termsVersion,
+    },
+    attribution: a.attribution,
+    slugCheck: a.slugCheck,
+  }
+}
+
+async function adminApiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = await authService.getValidAdminToken()
+  return fetch(`${ADMIN_API_BASE}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init.headers },
+  })
+}
+
+// Sends an approve/reject decision to the backend. Returns an error message when the
+// backend refused it; null when it succeeded or the application only exists locally.
+async function sendApplicationDecision(
+  app: TenantApplication | undefined,
+  body: { status: 'approved' | 'rejected'; slug?: string; reviewNotes?: string }
+): Promise<string | null> {
+  if (!app) return 'Application not found.'
+  try {
+    const res = await adminApiFetch(`/admin/applications/${app.id}/status`, { method: 'PUT', body: JSON.stringify(body) })
+    if (res.ok || (app.channel !== 'website' && (res.status === 404 || res.status === 401))) return null
+    const data = await res.json().catch(() => ({}))
+    return data.error || `The server refused this change (HTTP ${res.status}).`
+  } catch {
+    return app.channel === 'website' ? 'The platform server is unreachable. Website signups can only be decided while it is online.' : null
+  }
+}
+
 export function useAdminApplications(): {
   applications: TenantApplication[]
-  approve: (id: string) => TenantConfig | null
-  reject: (id: string) => void
+  approve: (id: string, slug?: string) => Promise<{ tenant: TenantConfig | null; error?: string }>
+  reject: (id: string, reviewNotes?: string) => Promise<{ error?: string }>
   submitApplication: (appData: {
     brandName: string
     ownerName: string
     ownerEmail: string
     phone: string
     niche: string
+    storeType?: string
+    categories?: string[]
     requestedSlug: string
     message?: string
   }) => TenantApplication
@@ -293,28 +404,57 @@ export function useAdminApplications(): {
     setApplications([...mockStore.getAllApplications()])
   }, [])
 
+  const syncFromBackend = useCallback(async () => {
+    try {
+      const res = await adminApiFetch('/admin/applications')
+      if (!res.ok) return
+      const remote: BackendApplication[] = await res.json()
+      if (Array.isArray(remote)) {
+        mockStore.mergeApplications(remote.map(fromBackendApplication))
+        refresh()
+      }
+    } catch {
+      // Backend offline: keep showing the locally stored applications.
+    }
+  }, [refresh])
+
   useEffect(() => {
     refresh()
+    syncFromBackend()
 
     const handleNewApp = () => {
       refresh()
     }
     window.addEventListener('orvexa:application-submitted', handleNewApp)
+    window.addEventListener('orvexa:applications-changed', handleNewApp)
+    window.addEventListener('focus', syncFromBackend)
     return () => {
       window.removeEventListener('orvexa:application-submitted', handleNewApp)
+      window.removeEventListener('orvexa:applications-changed', handleNewApp)
+      window.removeEventListener('focus', syncFromBackend)
     }
-  }, [refresh])
+  }, [refresh, syncFromBackend])
 
-  const approve = useCallback((id: string): TenantConfig | null => {
-    const tenant = mockStore.approveTenant(id)
-    refresh()
-    return tenant
-  }, [refresh])
+  const approve = useCallback(async (id: string, slug?: string) => {
+    const app = mockStore.getAllApplications().find((a) => a.id === id)
+    if (app?.status === 'waitlist') return { tenant: null, error: 'Early-access entries cannot be provisioned until their country launches.' }
+    const error = await sendApplicationDecision(app, { status: 'approved', ...(slug ? { slug } : {}) })
+    if (error) return { tenant: null, error }
+    const tenant = mockStore.approveTenant(id, slug)
+    if (tenant) await createStoreFolder(tenant.slug, tenant.brandName)
+    window.dispatchEvent(new Event('orvexa:applications-changed'))
+    window.dispatchEvent(new Event('orvexa:tenant-provisioned'))
+    return tenant ? { tenant } : { tenant: null, error: `The store address "${slug || app?.requestedSlug}" is already in use.` }
+  }, [])
 
-  const reject = useCallback((id: string) => {
+  const reject = useCallback(async (id: string, reviewNotes?: string) => {
+    const app = mockStore.getAllApplications().find((a) => a.id === id)
+    const error = await sendApplicationDecision(app, { status: 'rejected', ...(reviewNotes ? { reviewNotes } : {}) })
+    if (error) return { error }
     mockStore.rejectApplication(id)
-    refresh()
-  }, [refresh])
+    window.dispatchEvent(new Event('orvexa:applications-changed'))
+    return {}
+  }, [])
 
   const submitApplication = useCallback(
     (appData: {
@@ -323,6 +463,8 @@ export function useAdminApplications(): {
       ownerEmail: string
       phone: string
       niche: string
+      storeType?: string
+      categories?: string[]
       requestedSlug: string
       message?: string
     }) => {

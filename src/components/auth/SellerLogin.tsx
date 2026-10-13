@@ -198,7 +198,7 @@ export default function SellerLogin({ tenant, onLoginSuccess }: SellerLoginProps
         {/* Back Link */}
         <div className="mt-6 text-center">
           <a
-            href="/"
+            href={tenant?.slug ? `/t/${tenant.slug}` : '/admin'}
             className="text-xs text-white/40 hover:text-white transition-colors inline-flex items-center gap-1.5"
           >
             <span>← Return to Customer Storefront</span>

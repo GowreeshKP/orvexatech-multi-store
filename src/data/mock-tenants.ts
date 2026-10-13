@@ -45,14 +45,14 @@ export const MOCK_TENANTS: TenantConfig[] = [
     },
     subscription: {
       plan: 'pro',
-      pricePerMonth: 2499,
+      pricePerMonth: 3660,
       status: 'active',
       nextBillingDate: '2026-10-15',
       paymentMethod: 'razorpay',
       invoices: [
-        { id: 'INV-001', amount: 2499, status: 'paid', date: '2026-09-15', description: 'Pro Plan - September 2026' },
-        { id: 'INV-002', amount: 2499, status: 'paid', date: '2026-08-15', description: 'Pro Plan - August 2026' },
-        { id: 'INV-003', amount: 2499, status: 'paid', date: '2026-07-15', description: 'Pro Plan - July 2026' },
+        { id: 'INV-001', amount: 3660, status: 'paid', date: '2026-09-15', description: 'Growth Pro Plan - September 2026' },
+        { id: 'INV-002', amount: 3660, status: 'paid', date: '2026-08-15', description: 'Growth Pro Plan - August 2026' },
+        { id: 'INV-003', amount: 3660, status: 'paid', date: '2026-07-15', description: 'Growth Pro Plan - July 2026' },
       ],
     },
     databaseConfig: {
@@ -92,12 +92,12 @@ export const MOCK_TENANTS: TenantConfig[] = [
     },
     subscription: {
       plan: 'starter',
-      pricePerMonth: 999,
+      pricePerMonth: 1460,
       status: 'active',
       nextBillingDate: '2026-10-02',
       paymentMethod: 'razorpay',
       invoices: [
-        { id: 'INV-SH-001', amount: 999, status: 'paid', date: '2026-09-02', description: 'Starter Plan - September 2026' },
+        { id: 'INV-SH-001', amount: 1460, status: 'paid', date: '2026-09-02', description: 'Starter Plan - September 2026' },
       ],
     },
     databaseConfig: {
@@ -136,7 +136,7 @@ export const MOCK_TENANTS: TenantConfig[] = [
     },
     subscription: {
       plan: 'starter',
-      pricePerMonth: 999,
+      pricePerMonth: 1460,
       status: 'trial',
       trialEndsAt: '2026-10-10',
       nextBillingDate: '2026-10-10',

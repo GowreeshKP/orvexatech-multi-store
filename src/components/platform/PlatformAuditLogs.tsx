@@ -5,6 +5,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { auditLogger, type AuditLogEntry, type AuditCategory, type AuditSeverity } from '@/api/audit-logger'
 import { useAdminTenants } from '@/api/hooks'
+import { storeAddress } from '@/data/plans'
 
 const CATEGORY_LABELS: Record<string, { label: string; icon: string; badgeColor: string }> = {
   auth: { label: 'Auth & Login', icon: '🔑', badgeColor: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' },
@@ -140,7 +141,7 @@ export default function PlatformAuditLogs() {
                 IMMUTABLE AUDIT TRAIL
               </span>
               <span className="text-slate-600">•</span>
-              <span className="text-[11px] font-mono text-slate-400">AES-256 EVENT STREAM</span>
+              <span className="text-[11px] font-mono text-slate-400">AUDIT EVENT STREAM</span>
             </div>
 
             <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
@@ -433,7 +434,7 @@ export default function PlatformAuditLogs() {
                           <div>
                             <p className="font-semibold text-slate-800">{log.tenantName || log.tenantSlug}</p>
                             <code className="text-[10px] font-mono text-indigo-600 bg-indigo-50/80 px-1.5 py-0.5 rounded border border-indigo-100">
-                              {log.tenantSlug}.orvexatech.com
+                              {storeAddress(log.tenantSlug)}
                             </code>
                           </div>
                         ) : (

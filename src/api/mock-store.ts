@@ -6,6 +6,8 @@
 import type { TenantConfig, TenantApplication, PlatformStats, DashboardStats, ThemeConfig } from '@/types/tenant'
 import type { Product, Review, TrackedOrder } from '@/types'
 import { MOCK_TENANTS, MOCK_APPLICATIONS, MOCK_TENANT_DATABASES, type TenantDatabase } from '@/data/mock-tenants'
+import { buildTenantCategories, getNichePreset, inferStoreType } from '@/data/store-niches'
+import { PLAN_CATALOG, TRIAL_DAYS, normalizePlanId } from '@/data/plans'
 
 const STORAGE_KEY_TENANTS = 'orvexa_tenants_v1'
 const STORAGE_KEY_DATABASES = 'orvexa_databases_v1'
@@ -116,7 +118,21 @@ class MockPlatformStore {
   }
 
   getTenantByDomain(domain: string): TenantConfig | null {
-    return Array.from(this.tenants.values()).find((t) => t.customDomain === domain) || null
+    const host = String(domain || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*$/, '')
+      .replace(/^www\./, '')
+    if (!host) return null
+    return (
+      Array.from(this.tenants.values()).find((t) => {
+        const mapped = String(t.customDomain || '')
+          .toLowerCase()
+          .replace(/^www\./, '')
+        return Boolean(mapped) && mapped === host
+      }) || null
+    )
   }
 
   getAllApplications(): TenantApplication[] {
@@ -127,203 +143,43 @@ class MockPlatformStore {
     return Array.from(this.applications.values()).filter((a) => a.status === 'pending')
   }
 
-  approveTenant(applicationId: string): TenantConfig | null {
+  // Applications loaded from the backend (website signups included) replace local copies by id.
+  mergeApplications(remote: TenantApplication[]): void {
+    remote.forEach((a) => this.applications.set(a.id, { ...this.applications.get(a.id), ...a }))
+    this.persist()
+  }
+
+  approveTenant(applicationId: string, slugOverride?: string): TenantConfig | null {
     const app = this.applications.get(applicationId)
-    if (!app) return null
+    if (!app || app.status === 'waitlist') return null
 
+    const slug = slugOverride || app.requestedSlug
+    const existingTenant = Array.from(this.tenants.values()).find((t) => t.slug === slug)
+    // Only a placeholder store created for this application may be reused; a live store keeps its address.
+    if (existingTenant && existingTenant.status !== 'pending') return null
+
+    app.requestedSlug = slug
     app.status = 'approved'
+    app.slugCheck = { available: true }
 
-    // Check if tenant already exists in pending state
-    const existingTenant = Array.from(this.tenants.values()).find((t) => t.slug === app.requestedSlug)
     if (existingTenant) {
       existingTenant.status = 'active'
+      this.persist()
       return existingTenant
     }
 
-    // Provision a new tenant in master DB
-    const tenantId = `tenant_${app.requestedSlug}_${Date.now()}`
-    
-    // Choose curated themes based on niche/brand
-    let primaryColor = '#8C5A4F'
-    let accentColor = '#D4A574'
-    let heroImage = 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243'
-    let fontDisplay = "'Instrument Serif', Georgia, serif"
-    let fontSans = "'Work Sans', system-ui, sans-serif"
-
-    if (app.requestedSlug.includes('bloom') || app.niche.toLowerCase().includes('baby')) {
-      primaryColor = '#3D5A80'
-      accentColor = '#98C1D9'
-      heroImage = 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2175.jpg?v=1766941862'
-      fontDisplay = "'Playfair Display', Georgia, serif"
-      fontSans = "'Inter', system-ui, sans-serif"
-    } else if (app.requestedSlug.includes('khadi')) {
-      primaryColor = '#5C6B4E'
-      accentColor = '#C2B280'
-      heroImage = 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2175.jpg?v=1766941862'
-      fontDisplay = "'Cormorant Garamond', Georgia, serif"
-      fontSans = "'Source Sans 3', system-ui, sans-serif"
-    }
-
-    const newTenant: TenantConfig = {
-      id: tenantId,
-      slug: app.requestedSlug,
+    return this.createBlankStore({
       brandName: app.brandName,
-      ownerName: app.ownerName,
+      slug: app.requestedSlug,
+      ownerName: app.ownerName || app.ownerEmail.split('@')[0],
       ownerEmail: app.ownerEmail,
       ownerPhone: app.phone,
-      logo: '',
-      status: 'active',
-      plan: 'starter',
-      createdAt: new Date().toISOString().split('T')[0],
-      theme: {
-        primaryColor,
-        accentColor,
-        backgroundColor: '#FAFAF8',
-        fontDisplay,
-        fontSans,
-        heroImage,
-        logoUrl: '',
-        announcementMessages: [
-          `${app.brandName.toUpperCase()} • ${app.niche.toUpperCase()}`,
-          'FREE SHIPPING IN INDIA OVER ₹999',
-          `USE CODE: ${app.requestedSlug.toUpperCase()}10 FOR 10% OFF`,
-        ],
-        enableAnimations: true,
-        enableReviews: true,
-        enableOrderTracking: true,
-      },
-      subscription: {
-        plan: 'starter',
-        pricePerMonth: 999,
-        status: 'trial',
-        trialEndsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        paymentMethod: 'manual',
-        invoices: [],
-      },
-    }
-
-    this.tenants.set(tenantId, newTenant)
-
-    // Check if pre-seeded database exists in MOCK_TENANT_DATABASES
-    let existingDB = Array.from(this.tenantDatabases.entries()).find(([k]) => k.includes(app.requestedSlug))?.[1]
-    
-    if (existingDB && existingDB.products.length > 0) {
-      this.tenantDatabases.set(tenantId, existingDB)
-    } else {
-      // Seed rich tailored products for this newly approved store
-      this.tenantDatabases.set(tenantId, {
-        products: [
-          {
-            id: 401,
-            name: `${app.brandName} Signature Artisanal Piece`,
-            category: 'maxis',
-            sculptLevel: 'HERITAGE CRAFT',
-            fabricTech: 'Handcrafted Organic Weave',
-            fabricDesc: `Exquisite handcrafted piece created by artisans of ${app.brandName}, blending traditional craftsmanship with contemporary elegance.`,
-            compression: 'Tailored Fit',
-            price: 1899,
-            priceFormatted: '₹1,899',
-            rating: 4.9,
-            reviewsCount: 32,
-            badge: 'Bestseller',
-            colors: [
-              { name: 'Warm Terracotta', hex: '#E07A5F' },
-              { name: 'Natural Sand', hex: '#F4F1DE' },
-            ],
-            sizes: ['S', 'M', 'L', 'XL'],
-            imgMain: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
-            images: [
-              'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
-              'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5205.jpg?v=1778607246',
-            ],
-            desc: `Designed exclusively by ${app.brandName}. Soft, breathable, handcrafted with functional utility.`,
-            details: [
-              `Authentic ${app.niche}`,
-              '100% Premium Pure Yarn',
-              'Artisan direct quality guaranteed',
-            ],
-            fitInfo: 'True to size with flowing silhouette.',
-          },
-          {
-            id: 402,
-            name: `${app.brandName} Classic Festive Ensemble`,
-            category: 'dresses',
-            sculptLevel: 'FESTIVE WEAVE',
-            fabricTech: 'Handloom Cotton Blend',
-            fabricDesc: `Lightweight and elegant silhouette tailored for celebrations and special occasions.`,
-            compression: 'Festive Drape',
-            price: 2499,
-            priceFormatted: '₹2,499',
-            rating: 5.0,
-            reviewsCount: 19,
-            badge: 'New Season',
-            colors: [
-              { name: 'Royal Indigo', hex: '#3D5A80' },
-              { name: 'Golden Honey', hex: '#EE6C4D' },
-            ],
-            sizes: ['S', 'M', 'L', 'XL'],
-            imgMain: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5234.jpg?v=1778607246',
-            images: [
-              'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5234.jpg?v=1778607246',
-            ],
-            desc: `Refined festive design celebrating Indian heritage weaving traditions.`,
-            details: [
-              'Includes matching lining',
-              'Functional side pockets',
-              'Hand-finished hemline',
-            ],
-            fitInfo: 'Flared festive fit.',
-          },
-          {
-            id: 403,
-            name: `${app.brandName} Handblock Motif Stole`,
-            category: 'kalamkari',
-            sculptLevel: 'HANDBLOCK PRINT',
-            fabricTech: 'Natural Dye Block Print',
-            fabricDesc: `Handblock printed using traditional natural botanical dyes.`,
-            compression: 'Airy Drape',
-            price: 999,
-            priceFormatted: '₹999',
-            rating: 4.8,
-            reviewsCount: 24,
-            badge: 'Artisan Pick',
-            colors: [
-              { name: 'Earth Ochre', hex: '#DDA15E' },
-              { name: 'Forest Green', hex: '#283618' },
-            ],
-            sizes: ['Free Size (2m)'],
-            imgMain: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2171_1.jpg?v=1766941862',
-            images: [
-              'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2171_1.jpg?v=1766941862',
-            ],
-            desc: `Handcrafted natural dye stole featuring bespoke artisanal motifs.`,
-            details: [
-              'Length: 2.2 meters',
-              'Handwoven breathable yarn',
-            ],
-            fitInfo: 'Free size drape.',
-          },
-        ],
-        reviews: [
-          {
-            id: 401,
-            productId: 401,
-            author: 'Ananya S.',
-            rating: 5,
-            date: 'Just now',
-            title: `Exceptional quality from ${app.brandName}`,
-            comment: `The material is incredible and the stitching is perfection. Highly recommended!`,
-            verified: true,
-          },
-        ],
-        orders: [],
-        customers: [],
-      })
-    }
-
-    this.persist()
-    return newTenant
+      plan: normalizePlanId(app.requestedPlan?.id),
+      subscriptionStatus: 'trial',
+      storeType: app.storeType || inferStoreType(app.niche),
+      niche: app.niche,
+      categories: app.categories,
+    })
   }
 
   provisionTenant(input: {
@@ -334,145 +190,95 @@ class MockPlatformStore {
     ownerPhone?: string
     plan?: 'starter' | 'pro' | 'enterprise'
     niche?: string
+    storeType?: string
+    categories?: string[]
+    primaryColor?: string
+    accentColor?: string
+    customDomain?: string
+  }): TenantConfig {
+    return this.createBlankStore({
+      ...input,
+      storeType: input.storeType || inferStoreType(input.niche),
+      subscriptionStatus: 'active',
+    })
+  }
+
+  // Every new store reuses the Lunar storefront layout but starts empty:
+  // no products, photos, reviews or customers — only its own niche categories.
+  private createBlankStore(input: {
+    brandName: string
+    slug: string
+    ownerName: string
+    ownerEmail: string
+    ownerPhone?: string
+    plan?: 'starter' | 'pro' | 'enterprise'
+    subscriptionStatus: 'active' | 'trial'
+    storeType: string
+    niche?: string
+    categories?: string[]
     primaryColor?: string
     accentColor?: string
     customDomain?: string
   }): TenantConfig {
     const cleanSlug = input.slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '') || 'store'
     const tenantId = `tenant_${cleanSlug}`
-
-    const primaryColor = input.primaryColor || '#1e3a8a'
-    const accentColor = input.accentColor || '#3b82f6'
+    const preset = getNichePreset(input.storeType)
+    const nicheLabel = input.niche || preset.label
+    const categoryNames = input.categories && input.categories.length > 0 ? input.categories : preset.categories
+    const brandName = input.brandName.trim()
+    const plan = input.plan || 'starter'
+    const trialEnds = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 
     const newTenant: TenantConfig = {
       id: tenantId,
       slug: cleanSlug,
-      brandName: input.brandName.trim(),
+      brandName,
       ownerName: input.ownerName.trim(),
       ownerEmail: input.ownerEmail.trim().toLowerCase(),
       ownerPhone: input.ownerPhone || '',
       logo: '',
       customDomain: input.customDomain || '',
       status: 'active',
-      plan: input.plan || 'starter',
+      plan,
       createdAt: new Date().toISOString().split('T')[0],
+      storeType: preset.id,
+      niche: nicheLabel,
+      categories: buildTenantCategories(categoryNames),
+      contact: {
+        phone: input.ownerPhone || '',
+        email: input.ownerEmail.trim().toLowerCase(),
+      },
       theme: {
-        primaryColor,
-        accentColor,
+        primaryColor: input.primaryColor || preset.primaryColor,
+        accentColor: input.accentColor || preset.accentColor,
         backgroundColor: '#FAFAF8',
         fontDisplay: "'Instrument Serif', Georgia, serif",
         fontSans: "'Work Sans', system-ui, sans-serif",
-        heroImage: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
+        heroImage: '',
+        heroHeadline: brandName,
+        heroCtaText: 'SHOP NOW →',
         logoUrl: '',
         announcementMessages: [
-          `${input.brandName.toUpperCase()} • OFFICIAL STOREFRONT`,
-          'FREE DOMESTIC SHIPPING ACROSS INDIA',
-          `USE CODE ${cleanSlug.toUpperCase()}10 AT CHECKOUT`,
+          `WELCOME TO ${brandName.toUpperCase()}`,
+          `${nicheLabel.toUpperCase()} • OFFICIAL STORE`,
         ],
         enableAnimations: true,
         enableReviews: true,
         enableOrderTracking: true,
       },
       subscription: {
-        plan: input.plan || 'starter',
-        pricePerMonth: input.plan === 'enterprise' ? 4999 : input.plan === 'pro' ? 2499 : 999,
-        status: 'active',
-        trialEndsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        plan,
+        pricePerMonth: PLAN_CATALOG[plan].pricePerMonth,
+        status: input.subscriptionStatus,
+        trialEndsAt: trialEnds,
+        nextBillingDate: trialEnds,
         paymentMethod: 'manual',
         invoices: [],
       },
     }
 
     this.tenants.set(tenantId, newTenant)
-
-    // Seed tailored catalog products for this store's isolated database
-    this.tenantDatabases.set(tenantId, {
-      products: [
-        {
-          id: 501,
-          name: `${input.brandName} Signature Collection Maxi`,
-          category: 'maxis',
-          sculptLevel: 'HERITAGE WEAVE',
-          fabricTech: '100% Breathable Pure Cotton',
-          fabricDesc: `Artisanal masterpiece created with precision tailoring, flowing silhouette, and side utility pockets for ${input.brandName}.`,
-          compression: 'Flowing Silhouette',
-          price: 1899,
-          priceFormatted: '₹1,899',
-          rating: 4.9,
-          reviewsCount: 22,
-          badge: 'Bestseller',
-          colors: [
-            { name: 'Warm Terracotta', hex: '#E07A5F' },
-            { name: 'Ivory Cream', hex: '#FFF8DC' },
-          ],
-          sizes: ['S', 'M', 'L', 'XL', 'XXL'],
-          imgMain: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
-          images: [
-            'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
-            'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5205.jpg?v=1778607246',
-          ],
-          desc: `Exclusively created for ${input.brandName}. Soft, breathable, handcrafted with deep functional utility pockets.`,
-          details: [
-            `Authentic ${input.niche || 'Fashion'} collection`,
-            '100% Premium Pure Yarn',
-            'Side waist tie-up ropes with functional pockets',
-          ],
-          fitInfo: 'True to size with flowing maxi drape.',
-        },
-        {
-          id: 502,
-          name: `${input.brandName} Handcrafted Artisan Ensemble`,
-          category: 'dresses',
-          sculptLevel: 'FESTIVE WEAVE',
-          fabricTech: 'Natural Botanical Handloom',
-          fabricDesc: 'Lightweight festive drape woven by skilled master weavers.',
-          compression: 'Festive Fit',
-          price: 2499,
-          priceFormatted: '₹2,499',
-          rating: 5.0,
-          reviewsCount: 15,
-          badge: 'Trending',
-          colors: [
-            { name: 'Indigo Blue', hex: '#3D5A80' },
-            { name: 'Sage Green', hex: '#2E8B57' },
-          ],
-          sizes: ['S', 'M', 'L', 'XL'],
-          imgMain: 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5234.jpg?v=1778607246',
-          images: [
-            'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5234.jpg?v=1778607246',
-          ],
-          desc: `Handloom celebration piece from ${input.brandName}.`,
-          details: ['Matching inner lining included', 'Hand-finished hemline'],
-          fitInfo: 'Flared regular fit.',
-        },
-      ],
-      reviews: [
-        {
-          id: 501,
-          productId: 501,
-          author: 'Pooja R.',
-          rating: 5,
-          date: 'Just now',
-          title: `Exceptional craftsmanship from ${input.brandName}`,
-          comment: 'The fabric feels so luxurious and the fit is stunning. Fast shipping too!',
-          verified: true,
-        },
-      ],
-      orders: [],
-      customers: [
-        {
-          id: 'cust_01',
-          name: input.ownerName,
-          email: input.ownerEmail,
-          phone: input.ownerPhone || '',
-          ordersCount: 1,
-          totalSpent: 1899,
-          joinedDate: new Date().toISOString().split('T')[0],
-        },
-      ],
-    })
-
+    this.tenantDatabases.set(tenantId, { products: [], reviews: [], orders: [], customers: [] })
     this.persist()
 
     if (typeof window !== 'undefined') {
@@ -488,6 +294,8 @@ class MockPlatformStore {
     ownerEmail: string
     phone: string
     niche: string
+    storeType?: string
+    categories?: string[]
     requestedSlug: string
     message?: string
   }): TenantApplication {
@@ -500,6 +308,8 @@ class MockPlatformStore {
       ownerEmail: appData.ownerEmail,
       phone: appData.phone,
       niche: appData.niche || 'Fashion & Apparel',
+      storeType: appData.storeType || inferStoreType(appData.niche),
+      categories: appData.categories,
       requestedSlug: slug,
       message: appData.message || 'Client application submitted via Orvexa Cloud platform portal',
       submittedAt: new Date().toISOString().split('T')[0],
@@ -550,10 +360,9 @@ class MockPlatformStore {
   changePlan(tenantId: string, plan: 'starter' | 'pro' | 'enterprise'): void {
     const tenant = this.tenants.get(tenantId)
     if (tenant) {
-      const pricing = { starter: 999, pro: 2499, enterprise: 4999 }
       tenant.plan = plan
       tenant.subscription.plan = plan
-      tenant.subscription.pricePerMonth = pricing[plan]
+      tenant.subscription.pricePerMonth = PLAN_CATALOG[plan].pricePerMonth
       this.persist()
     }
   }
@@ -637,8 +446,27 @@ class MockPlatformStore {
     return this.getDB(tenantId).orders
   }
 
-  placeOrder(tenantId: string, order: TrackedOrder): void {
-    this.getDB(tenantId).orders.unshift(order)
+  placeOrder(tenantId: string, order: TrackedOrder, customerEmail?: string): void {
+    const db = this.getDB(tenantId)
+    db.orders.unshift(order)
+
+    const phone = order.shippingAddress?.phone || ''
+    const email = customerEmail || ''
+    const existing = db.customers.find((c) => (email && c.email === email) || (phone && c.phone === phone))
+    if (existing) {
+      existing.orderCount = (existing.orderCount ?? existing.ordersCount ?? 0) + 1
+      existing.totalSpent += order.total
+    } else {
+      db.customers.push({
+        id: `cust_${Date.now()}`,
+        name: order.shippingAddress?.name || 'Customer',
+        email,
+        phone,
+        orderCount: 1,
+        totalSpent: order.total,
+        joinedDate: order.date,
+      })
+    }
     this.persist()
   }
 
@@ -730,6 +558,51 @@ class MockPlatformStore {
   getDashboardStats(tenantId: string): DashboardStats {
     const db = this.getDB(tenantId)
     const totalRevenue = db.orders.reduce((sum, o) => sum + o.total, 0)
+    const isTemplate = !!this.tenants.get(tenantId)?.storeType
+
+    if (isTemplate) {
+      const sales = new Map<string, { revenue: number; orders: number }>()
+      for (const order of db.orders) {
+        for (const item of order.items || []) {
+          const s = sales.get(item.name) || { revenue: 0, orders: 0 }
+          s.revenue += item.price * item.quantity
+          s.orders += item.quantity
+          sales.set(item.name, s)
+        }
+      }
+      const days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date()
+        d.setDate(d.getDate() - (6 - i))
+        return d
+      })
+      return {
+        revenue: totalRevenue,
+        revenueChange: 0,
+        orderCount: db.orders.length,
+        orderCountChange: 0,
+        averageOrderValue: db.orders.length ? totalRevenue / db.orders.length : 0,
+        customerCount: db.customers.length,
+        topProducts: db.products
+          .map((p) => ({ name: p.name, ...(sales.get(p.name) || { revenue: 0, orders: 0 }) }))
+          .sort((a, b) => b.revenue - a.revenue)
+          .slice(0, 5),
+        recentOrders: db.orders.slice(0, 5).map((o) => ({
+          id: o.id,
+          customer: o.shippingAddress.name,
+          total: o.total,
+          status: o.status,
+          date: o.date,
+        })),
+        revenueByDay: days.map((d) => {
+          const dayOrders = db.orders.filter((o) => new Date(o.date).toDateString() === d.toDateString())
+          return {
+            date: d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
+            amount: dayOrders.reduce((sum, o) => sum + o.total, 0),
+            orders: dayOrders.length,
+          }
+        }),
+      }
+    }
 
     return {
       revenue: totalRevenue,

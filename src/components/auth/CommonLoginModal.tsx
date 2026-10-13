@@ -30,7 +30,7 @@ export default function CommonLoginModal({ isOpen, onClose, onSuccess }: Props) 
   const [forgotError, setForgotError] = useState<string | null>(null)
   const [forgotResetToken, setForgotResetToken] = useState<string | null>(null)
 
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+  const API_BASE = import.meta.env.VITE_API_URL || ''
 
   const handleLogin = useCallback(
     async (e: React.FormEvent) => {
@@ -90,12 +90,11 @@ export default function CommonLoginModal({ isOpen, onClose, onSuccess }: Props) 
         if (!res.ok) {
           setForgotError(data.error || 'Failed to generate reset link.')
         } else {
-          setForgotResetToken(data.resetToken || 'demo-token')
+          setForgotResetToken(null)
           setView('forgot-sent')
         }
       } catch {
-        setForgotResetToken('demo-token-fallback')
-        setView('forgot-sent')
+        setForgotError('Could not reach the server. Please try again in a moment.')
       } finally {
         setForgotLoading(false)
       }

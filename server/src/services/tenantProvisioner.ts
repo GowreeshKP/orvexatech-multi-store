@@ -5,9 +5,16 @@
 
 import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
+import { PLAN_CATALOG, PLATFORM_ROOT_DOMAIN, TRIAL_DAYS, type PlanId } from '../config/plans.js'
 
-// Filesystem operations are only available locally
+// Filesystem scaffolding is a local-development convenience only; production keeps everything in MongoDB.
 const isVercel = Boolean(process.env.VERCEL)
+const skipScaffolding = isVercel || process.env.NODE_ENV === 'production' || process.env.TENANT_SCAFFOLDING === 'off'
+
+/** Hides the user:password part of a MongoDB URI. */
+function redactUri(uri: string): string {
+  return uri.replace(/\/\/[^@/]+@/, '//***:***@')
+}
 
 export interface ProvisionTenantInput {
   slug: string
@@ -21,6 +28,7 @@ export interface ProvisionTenantInput {
   primaryColor?: string
   accentColor?: string
   initialPassword?: string // plain-text; will be bcrypt-hashed before storage
+  plan?: PlanId
 }
 
 export interface ProvisionResult {
@@ -38,26 +46,27 @@ export async function provisionTenantFolders(input: ProvisionTenantInput): Promi
   const dbName = `orvexa_tenant_${slug}`
   const tenantBaseUri = process.env.MONGODB_TENANT_BASE_URI || 'mongodb://localhost:27017/orvexa_tenant_'
   const mongoUri = input.customMongoUri?.trim() || `${tenantBaseUri}${slug}`
-  const jwtSecret = `orvexa_jwt_${slug}_${crypto.randomBytes(8).toString('hex')}`
-  const webhookSecret = `whsec_${slug}_${crypto.randomBytes(8).toString('hex')}`
   const primaryColor = input.primaryColor || '#8C5A4F'
   const accentColor = input.accentColor || '#D4A574'
+  const plan = input.plan || 'starter'
+  const trialEnds = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 
-  // Generate and hash initial merchant password
-  const rawPassword = input.initialPassword || `${slug}@${crypto.randomBytes(4).toString('hex')}`
+  // Without an explicit initial password the owner sets one through the emailed link.
+  const rawPassword = input.initialPassword || crypto.randomBytes(24).toString('base64url')
   const passwordHash = await bcrypt.hash(rawPassword, 12)
+  const q = (s: string) => JSON.stringify(s)
 
   const srcEnvPath = `src/tenants/${slug}/tenant.env`
 
   // ── Filesystem scaffolding — local development only ─────────────────────
   // Vercel's runtime has a read-only filesystem, so we skip this entirely.
   // All tenant configuration is stored in MongoDB (master DB Tenant document).
-  if (!isVercel) {
+  if (!skipScaffolding) {
     try {
       // Lazy-import fs/path only when actually needed (keeps the serverless bundle clean)
       const fs = await import('fs')
       const path = await import('path')
-      const { fileURLToPath } = await import('url')
+      const { fileURLToPath, pathToFileURL } = await import('url')
 
       const __filename = fileURLToPath(import.meta.url)
       const __dirname = path.dirname(__filename)
@@ -76,42 +85,33 @@ export async function provisionTenantFolders(input: ProvisionTenantInput): Promi
 
 TENANT_ID=tenant_${slug}_${Date.now()}
 TENANT_SLUG=${slug}
-BRAND_NAME="${input.brandName}"
-SUBDOMAIN=${slug}.orvexatech.com
-CUSTOM_DOMAIN=${input.customDomain || ''}
+BRAND_NAME=${q(input.brandName)}
+SUBDOMAIN=${slug}.${PLATFORM_ROOT_DOMAIN}
+CUSTOM_DOMAIN=${q(input.customDomain || '')}
 PRIMARY_COLOR="${primaryColor}"
 ACCENT_COLOR="${accentColor}"
 
 # --- Isolated Database Configuration ---
+# Credentials are never written here; the server builds the URI from MONGODB_TENANT_BASE_URI.
 MONGODB_DB_NAME=${dbName}
-MONGODB_URI=${mongoUri}
+MONGODB_URI_REDACTED=${redactUri(mongoUri)}
 MONGODB_ISOLATION_MODE=dedicated_database
-
-# --- Store Service Secrets ---
-JWT_SECRET=${jwtSecret}
-API_PORT=5000
-STORAGE_BUCKET=orvexatech-media-${slug}
-WEBHOOK_SECRET=${webhookSecret}
 ENABLE_ORDER_TRACKING=true
 ENABLE_CUSTOMER_REVIEWS=true
-
-# --- Merchant Credentials (bcrypt hashed — stored in master DB) ---
-# Initial raw password (share securely with merchant, delete after first login):
-# RAW_PASSWORD=${rawPassword}
-PASSWORD_HASH=${passwordHash}
 `
+      const camel = slug.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase())
       const configTsContent = `import type { TenantConfig } from '@/types/tenant'
 
-export const ${slug}TenantConfig: TenantConfig = {
-  id: 'tenant_${slug}_${Date.now()}',
-  slug: '${slug}',
-  brandName: '${input.brandName}',
-  ownerName: '${input.ownerName}',
-  ownerEmail: '${input.ownerEmail}',
-  ownerPhone: '${input.ownerPhone || ''}',
+export const ${camel}TenantConfig: TenantConfig = {
+  id: ${q(`tenant_${slug}_${Date.now()}`)},
+  slug: ${q(slug)},
+  brandName: ${q(input.brandName)},
+  ownerName: ${q(input.ownerName || '')},
+  ownerEmail: ${q(input.ownerEmail)},
+  ownerPhone: ${q(input.ownerPhone || '')},
   logo: '',
   status: 'active',
-  plan: 'starter',
+  plan: '${plan}',
   createdAt: '${new Date().toISOString().split('T')[0]}',
   theme: {
     primaryColor: '${primaryColor}',
@@ -120,12 +120,12 @@ export const ${slug}TenantConfig: TenantConfig = {
     fontDisplay: "'Instrument Serif', Georgia, serif",
     fontSans: "'Work Sans', system-ui, sans-serif",
     heroImage: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=1600&q=80',
-    heroHeadline: '${input.brandName} Atelier',
-    heroSubhead: '${input.description || `Handcrafted exclusive collection from ${input.brandName}`}',
+    heroHeadline: ${q(`${input.brandName} Atelier`)},
+    heroSubhead: ${q(input.description || `Handcrafted exclusive collection from ${input.brandName}`)},
     heroCtaText: 'EXPLORE CATALOG →',
     logoUrl: '',
     announcementMessages: [
-      'WELCOME TO ${input.brandName.toUpperCase()}',
+      ${q(`WELCOME TO ${input.brandName.toUpperCase()}`)},
       'FREE SHIPPING OVER ₹999',
     ],
     enableAnimations: true,
@@ -133,16 +133,17 @@ export const ${slug}TenantConfig: TenantConfig = {
     enableOrderTracking: true,
   },
   subscription: {
-    plan: 'starter',
-    pricePerMonth: 999,
-    status: 'active',
-    nextBillingDate: '${new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}',
+    plan: '${plan}',
+    pricePerMonth: ${PLAN_CATALOG[plan].pricePerMonth},
+    status: 'trial',
+    trialEndsAt: '${trialEnds}',
+    nextBillingDate: '${trialEnds}',
     paymentMethod: 'razorpay',
     invoices: [],
   },
   databaseConfig: {
     dbName: '${dbName}',
-    mongoUri: '${mongoUri}',
+    mongoUri: ${q(redactUri(mongoUri))},
     isolationMode: 'dedicated_database',
     folderPath: 'src/tenants/${slug}',
   },
@@ -155,12 +156,17 @@ export const ${slug}TenantConfig: TenantConfig = {
       fs.writeFileSync(path.join(srcTenantsDir, 'config.ts'), configTsContent, 'utf-8')
       fs.writeFileSync(path.join(srcTenantsDir, 'index.ts'), `export * from './config'\n`, 'utf-8')
 
+      // Loaded at runtime because the script lives outside the server's TypeScript project.
+      const scaffoldScript = path.join(rootDir, 'scripts', 'create-store.mjs')
+      if (fs.existsSync(scaffoldScript)) {
+        const { scaffoldStoreFolder } = await import(pathToFileURL(scaffoldScript).href)
+        scaffoldStoreFolder({ rootDir, slug, brandName: input.brandName })
+      }
+
       console.log(`[Provisioner] Scaffolded local tenant folder: src/tenants/${slug}`)
     } catch (fsErr) {
       console.warn('[Provisioner] Filesystem scaffolding failed (non-fatal):', fsErr)
     }
-  } else {
-    console.log(`[Provisioner] Vercel runtime — skipping filesystem scaffolding for "${slug}". Config stored in MongoDB.`)
   }
 
   return {
@@ -168,7 +174,7 @@ export const ${slug}TenantConfig: TenantConfig = {
     folderPath: `src/tenants/${slug}`,
     envFilePath: srcEnvPath,
     dbName,
-    mongoUri,
+    mongoUri: redactUri(mongoUri),
     passwordHash,
     message: isVercel
       ? `Provisioned isolated database and credentials for ${input.brandName} (MongoDB only on Vercel)`

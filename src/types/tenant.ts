@@ -14,10 +14,15 @@ export interface TenantConfig {
   logo: string
   logoUrl?: string
   theme: ThemeConfig
-  status: 'pending' | 'active' | 'suspended' | 'cancelled'
+  status: 'pending' | 'active' | 'read_only' | 'suspended' | 'cancelled'
   plan: 'starter' | 'pro' | 'enterprise'
   customDomain?: string
+  customDomainVerified?: boolean
   createdAt: string
+  // Niche preset id from src/data/store-niches.ts. Set only on stores cloned
+  // from the blank template; legacy demo stores leave it undefined.
+  storeType?: string
+  niche?: string
   currency?: string
   currencySymbol?: string
   aboutStory?: string
@@ -64,7 +69,19 @@ export interface ThemeConfig {
   enableOrderTracking: boolean
   discountCode?: string
   discountPercent?: number
+  // Owner text overrides keyed by StorefrontCopy field; blank values fall back to the niche default.
+  copy?: Record<string, string>
+  trustItems?: { icon: string; text: string }[]
+  homeSections?: { id: HomeSectionId; visible: boolean }[]
+  pdpOptions?: Partial<Record<PdpOptionId, boolean>>
+  footerOptions?: { trustStrip?: boolean; newsletter?: boolean }
+  socialLinks?: { instagram?: string; whatsapp?: string; pinterest?: string; facebook?: string }
+  freeShippingThreshold?: number
+  shippingFee?: number
 }
+
+export type HomeSectionId = 'trustBar' | 'bestsellers' | 'categories' | 'featured' | 'triptych' | 'mission'
+export type PdpOptionId = 'zoom' | 'guarantee' | 'details' | 'shipping' | 'related'
 
 export interface SubscriptionInfo {
   plan: 'starter' | 'pro' | 'enterprise'
@@ -91,10 +108,21 @@ export interface TenantApplication {
   ownerEmail: string
   phone: string
   niche: string
+  storeType?: string
+  categories?: string[]
   requestedSlug: string
   message: string
   submittedAt: string
-  status: 'pending' | 'approved' | 'rejected'
+  // 'waitlist' = early-access signup from a country that has not launched; never provisioned.
+  status: 'pending' | 'approved' | 'rejected' | 'waitlist'
+  // Fields below arrive with marketing-site signups (POST /api/public/signups).
+  channel?: 'admin' | 'website'
+  requestedPlan?: { id: string; name?: string; cycle?: 'monthly' | 'yearly'; currency?: string; total?: number; trialDays?: number }
+  launch?: { status: 'live' | 'early_access'; country: string }
+  migration?: { from?: string | null; currentDomain?: string | null } | null
+  consents?: { marketing: boolean; termsAcceptedAt?: string; termsVersion?: { terms?: string; privacy?: string; refunds?: string } | null }
+  attribution?: { site?: string; country?: string; referrer?: string; utm?: Record<string, string> }
+  slugCheck?: { available: boolean; reason?: 'reserved' | 'taken' | 'requested' | 'invalid' }
 }
 
 export interface PlatformStats {
@@ -115,5 +143,5 @@ export interface DashboardStats {
   customerCount: number
   topProducts: { name: string; revenue: number; orders: number }[]
   recentOrders: { id: string; customer: string; total: number; status: string; date: string }[]
-  revenueByDay: { date: string; amount: number }[]
+  revenueByDay: { date: string; amount: number; orders?: number }[]
 }

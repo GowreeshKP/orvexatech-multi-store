@@ -15,6 +15,8 @@ import {
   type IThemeConfigDoc,
   type ICustomerDoc,
 } from '../models/tenant/Review.js'
+import { SLUG_PATTERN } from '../lib/validate.js'
+import { getTenantStoreEventModel, type IStoreEvent } from '../models/tenant/StoreEvent.js'
 
 export interface TenantDbContext {
   connection: Connection
@@ -23,6 +25,7 @@ export interface TenantDbContext {
   Review: Model<IReview>
   ThemeConfig: Model<IThemeConfigDoc>
   Customer: Model<ICustomerDoc>
+  StoreEvent: Model<IStoreEvent>
 }
 
 declare global {
@@ -36,28 +39,20 @@ declare global {
 
 export async function tenantResolver(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    let slug = 'lunar'
-    if (typeof req.params.tenantSlug === 'string' && req.params.tenantSlug) {
-      slug = req.params.tenantSlug
-    } else if (typeof req.headers['x-tenant-slug'] === 'string' && req.headers['x-tenant-slug']) {
-      slug = req.headers['x-tenant-slug']
-    } else if (typeof req.query.tenant === 'string' && req.query.tenant) {
-      slug = req.query.tenant
+    // The store comes from the URL path only. Unknown stores are a 404 — never a fallback to
+    // another store, which would let requests (and writes) land in the wrong tenant's database.
+    const slug = String(req.params.tenantSlug || '').trim().toLowerCase()
+    if (!SLUG_PATTERN.test(slug)) {
+      res.status(404).json({ error: 'Store not found.' })
+      return
     }
-    slug = slug.trim().toLowerCase()
 
-    // 2. Query master database for tenant configuration
     const masterDb = await connectMasterDatabase()
     const TenantModel = getTenantModel(masterDb)
-    let tenant = await TenantModel.findOne({ slug })
-
-    // Fallback to primary store ('lunar') if not found
-    if (!tenant && slug !== 'lunar') {
-      tenant = await TenantModel.findOne({ slug: 'lunar' })
-    }
+    const tenant = await TenantModel.findOne({ slug })
 
     if (!tenant) {
-      res.status(404).json({ error: `Store "${slug}" not found in Orvexa Tech Platform.` })
+      res.status(404).json({ error: 'Store not found.' })
       return
     }
 
@@ -69,6 +64,11 @@ export async function tenantResolver(req: Request, res: Response, next: NextFunc
 
     if (tenant.status === 'pending') {
       res.status(403).json({ error: 'This store is pending approval and not yet active.' })
+      return
+    }
+
+    if (tenant.status === 'cancelled') {
+      res.status(403).json({ error: 'This store has closed.' })
       return
     }
 
@@ -84,11 +84,12 @@ export async function tenantResolver(req: Request, res: Response, next: NextFunc
       Review: getTenantReviewModel(tenantConn),
       ThemeConfig: getTenantThemeModel(tenantConn),
       Customer: getTenantCustomerModel(tenantConn),
+      StoreEvent: getTenantStoreEventModel(tenantConn),
     }
 
     next()
   } catch (error) {
     console.error('[Tenant Resolver Error]:', error)
-    res.status(500).json({ error: 'Failed to connect to isolated store database.' })
+    res.status(503).json({ error: 'The store is temporarily unavailable. Please try again shortly.' })
   }
 }

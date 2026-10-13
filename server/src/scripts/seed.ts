@@ -79,7 +79,7 @@ export async function seedAllDatabases() {
 
     // Seed Products
     if (tenantSlug === 'lunar') {
-      await Product.insertMany(SEED_LUNAR_PRODUCTS)
+      await Product.insertMany(SEED_LUNAR_PRODUCTS.map((p) => ({ stockCount: 50, ...p })))
       console.log(`   - Seeded ${SEED_LUNAR_PRODUCTS.length} products in ${tenantConn.name}`)
     }
 

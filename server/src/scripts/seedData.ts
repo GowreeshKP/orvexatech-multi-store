@@ -36,7 +36,7 @@ export const SEED_TENANTS = [
     },
     subscription: {
       plan: 'pro',
-      pricePerMonth: 2499,
+      pricePerMonth: 3660,
       status: 'active',
       nextBillingDate: '2026-10-15',
       paymentMethod: 'razorpay',
@@ -74,7 +74,7 @@ export const SEED_TENANTS = [
     },
     subscription: {
       plan: 'starter',
-      pricePerMonth: 999,
+      pricePerMonth: 1460,
       status: 'active',
       nextBillingDate: '2026-10-02',
       paymentMethod: 'razorpay',

@@ -33,13 +33,13 @@ export const silkhausTenantConfig: TenantConfig = {
   },
   subscription: {
     plan: 'starter',
-    pricePerMonth: 999,
+    pricePerMonth: 1460,
     status: 'active',
     nextBillingDate: '2026-10-02',
     paymentMethod: 'razorpay',
     invoices: [
-      { id: 'INV-101', amount: 999, status: 'paid', date: '2026-09-02', description: 'Starter Plan - September 2026' },
-      { id: 'INV-102', amount: 999, status: 'paid', date: '2026-08-02', description: 'Starter Plan - August 2026' },
+      { id: 'INV-101', amount: 1460, status: 'paid', date: '2026-09-02', description: 'Starter Plan - September 2026' },
+      { id: 'INV-102', amount: 1460, status: 'paid', date: '2026-08-02', description: 'Starter Plan - August 2026' },
     ],
   },
   databaseConfig: {

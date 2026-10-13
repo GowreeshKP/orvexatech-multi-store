@@ -92,6 +92,13 @@ const STORE_CREDENTIALS_KEY = 'orvexa_store_credentials_v1'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 
+/**
+ * Offline demo mode: local credential fallbacks and the browser-only credentials registry.
+ * On in `vite dev`; production builds only enable it with VITE_DEMO_MODE=true. Outside demo
+ * mode the backend is the only authority and no passwords are kept in the browser.
+ */
+export const DEMO_MODE = import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true'
+
 function getStoredCredentialsMap(): Record<string, StoreCredentialInfo> {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return {}
@@ -106,7 +113,10 @@ function getStoredCredentialsMap(): Record<string, StoreCredentialInfo> {
 function saveStoredCredentialsMap(map: Record<string, StoreCredentialInfo>): void {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.setItem(STORE_CREDENTIALS_KEY, JSON.stringify(map))
+      const safe = DEMO_MODE
+        ? map
+        : Object.fromEntries(Object.entries(map).map(([k, v]) => [k, { ...v, password: '', resetToken: undefined, resetUrl: undefined }]))
+      localStorage.setItem(STORE_CREDENTIALS_KEY, JSON.stringify(safe))
       window.dispatchEvent(new CustomEvent('orvexa:credentials-updated', { detail: map }))
     }
   } catch (e) {
@@ -150,7 +160,7 @@ export const authService = {
         const demo = DEFAULT_DEMO_SELLER_CREDENTIALS.find((d) => d.tenantSlug === tenant.slug)
         result.push({
           loginId: tenant.ownerEmail || (demo?.loginId ?? `${tenant.slug}@store.com`),
-          password: demo?.password || `${tenant.slug}@password`,
+          password: DEMO_MODE ? demo?.password || `${tenant.slug}@password` : '',
           tenantSlug: tenant.slug,
           tenantName: tenant.brandName || tenant.name || 'Store',
           ownerName: tenant.ownerName || 'Store Owner',
@@ -177,7 +187,7 @@ export const authService = {
     const tenant = mockStore.getTenantBySlug(slug)
     return {
       loginId: tenant?.ownerEmail || `${slug}@store.com`,
-      password: `${slug}@password`,
+      password: DEMO_MODE ? `${slug}@password` : '',
       tenantSlug: slug,
       tenantName: tenant?.brandName || slug,
       ownerName: tenant?.ownerName || 'Store Owner',
@@ -229,16 +239,25 @@ export const authService = {
 
       if (res.ok) {
         backendData = await res.json()
+      } else if (!DEMO_MODE) {
+        const err = await res.json().catch(() => ({}))
+        const message = err.error || 'The password reset could not be started.'
+        return { success: false, message, error: message, resetToken: '', resetUrl: '', ownerEmail: '' }
       }
     } catch (err) {
-      console.warn('Backend trigger-password-reset offline, running client fallback:', err)
+      if (!DEMO_MODE) {
+        const message = 'Could not reach the server. The password was not reset.'
+        return { success: false, message, error: message, resetToken: '', resetUrl: '', ownerEmail: '' }
+      }
+      console.warn('Backend trigger-password-reset offline, running demo fallback:', err)
     }
 
     const customMap = getStoredCredentialsMap()
     const prev = customMap[slug] || this.getStoreCredential(slug)
-    const targetEmail = email ? email.trim().toLowerCase() : prev.loginId
+    const targetEmail = backendData?.ownerEmail || (email ? email.trim().toLowerCase() : prev.loginId)
 
-    const resetToken = backendData?.resetToken || `rst_${Math.random().toString(36).substring(2, 14)}_${Date.now()}`
+    // Only demo mode invents a local token; real links come from the backend (single-use, hashed server-side).
+    const resetToken = backendData?.resetToken || `demo_${crypto.randomUUID()}`
     const resetUrl =
       backendData?.resetUrl || `${window.location.origin}/?reset_token=${resetToken}&slug=${slug}`
 
@@ -266,12 +285,12 @@ export const authService = {
       category: 'security',
       severity: 'security',
       details: `Password reset dispatched to ${targetEmail} for store "${prev.tenantName}". Old password was immediately revoked.`,
-      metadata: { slug, email: targetEmail, resetToken },
+      metadata: { slug, email: targetEmail },
     })
 
     return {
       success: true,
-      message: `Password reset email dispatched to ${targetEmail}. Previous password has been revoked immediately.`,
+      message: backendData?.message || `Password reset email dispatched to ${targetEmail}. Previous password has been revoked immediately.`,
       resetToken,
       resetUrl,
       ownerEmail: targetEmail,
@@ -299,14 +318,17 @@ export const authService = {
         return { success: false, message: data.error || 'Failed to reset password.', error: data.error || 'Failed to reset password.' }
       }
     } catch {
-      // Backend offline, fallback to client update
+      if (!DEMO_MODE) {
+        const message = 'Could not reach the server. Please try again.'
+        return { success: false, message, error: message }
+      }
     }
 
     const customMap = getStoredCredentialsMap()
     const prev = customMap[slug] || this.getStoreCredential(slug)
     customMap[slug] = {
       ...prev,
-      password: newPassword.trim(),
+      password: newPassword,
       isPasswordRevoked: false,
       passwordResetPending: false,
       resetToken: undefined,
@@ -378,10 +400,17 @@ export const authService = {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}))
+        if (!DEMO_MODE) {
+          const message = errData.error || 'Failed to update credentials.'
+          return { success: false, message, error: message }
+        }
         console.warn('Backend credentials update returned error:', errData.error)
       }
     } catch {
-      // Backend offline, fallback to client-side storage
+      if (!DEMO_MODE) {
+        const message = 'Could not reach the server. Nothing was changed.'
+        return { success: false, message, error: message }
+      }
     }
 
     // 2. Update local mockStore
@@ -449,8 +478,19 @@ export const authService = {
   ): Promise<{ success: boolean; message: string; error?: string }> {
     const slug = tenantSlug.trim().toLowerCase()
 
-    if (!params.newPassword || params.newPassword.length < 6) {
-      return { success: false, message: 'Password must be at least 6 characters.', error: 'Password too short' }
+    if (!params.newPassword || params.newPassword.length < 8) {
+      return { success: false, message: 'Password must be at least 8 characters.', error: 'Password too short' }
+    }
+
+    if (DEMO_MODE && params.currentPassword !== undefined) {
+      const stored = getStoredCredentialsMap()[slug] || this.getStoreCredential(slug)
+      if (stored.password !== params.currentPassword.trim()) {
+        return {
+          success: false,
+          message: 'Current password is incorrect. Please try again.',
+          error: 'Current password is incorrect',
+        }
+      }
     }
 
     // 1. Attempt backend update
@@ -466,12 +506,16 @@ export const authService = {
       })
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}))
-        if (errData.error?.includes('Current password')) {
-          return { success: false, message: errData.error, error: errData.error }
+        if (!DEMO_MODE || errData.error?.includes('Current password')) {
+          const message = errData.error || 'Failed to update password.'
+          return { success: false, message, error: message }
         }
       }
     } catch {
-      // Backend offline, fallback to client-side storage
+      if (!DEMO_MODE) {
+        const message = 'Could not reach the server. Your password was not changed.'
+        return { success: false, message, error: message }
+      }
     }
 
     // 2. Update local mockStore
@@ -541,9 +585,9 @@ export const authService = {
       const session: SellerSession = data.session
       try {
         localStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session))
-        if (data.token) {
-          localStorage.setItem(SELLER_TOKEN_KEY, data.token)
-        }
+        const token = data.accessToken || data.token
+        if (token) localStorage.setItem(SELLER_TOKEN_KEY, token)
+        if (data.refreshToken) localStorage.setItem('orvexa_refresh_token', data.refreshToken)
       } catch {
         // storage disabled
       }
@@ -562,7 +606,10 @@ export const authService = {
 
       return { success: true, session }
     } catch (err: any) {
-      // ── Dynamic & offline credential verification ──────────
+      if (!DEMO_MODE) {
+        return { success: false, error: err.message || 'Invalid login ID or password.' }
+      }
+      // ── Demo mode: offline credential verification ──────────
       const allCreds = this.getStoreCredentialsList()
 
       const matchingAccount = allCreds.find(
@@ -696,8 +743,13 @@ export const authService = {
         }
         return { success: true, session: data.session }
       }
+      if (!DEMO_MODE) {
+        return { success: false, error: data.error || 'Invalid login credentials. Please check your email or password.' }
+      }
     } catch {
-      // Backend error/offline, fallback to demo/local resolution
+      if (!DEMO_MODE) {
+        return { success: false, error: 'Could not reach the authentication server. Please check your connection.' }
+      }
     }
 
     // Try Admin Credentials Fallback
@@ -753,8 +805,9 @@ export const authService = {
 
       return { success: true, session }
     } catch (err: any) {
-      // ── Offline / demo fallback ──────────────────────────
+      // ── Demo mode only: offline admin login ──────────────
       const isDemo =
+        DEMO_MODE &&
         (cleanId === 'admin@orvexatech.com' || cleanId === 'admin@platform.com' || cleanId === 'admin') &&
         cleanPass === DEMO_ADMIN_CREDENTIAL.password
 
@@ -831,32 +884,8 @@ export const authService = {
       // refresh failed
     }
 
-    // Auto-renew with master credentials if admin session is active
-    const adminSession = this.getAdminSession()
-    if (adminSession && adminSession.role === 'super_admin') {
-      try {
-        const loginRes = await fetch(`${API_BASE}/auth/admin/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            loginId: DEMO_ADMIN_CREDENTIAL.loginId,
-            password: DEMO_ADMIN_CREDENTIAL.password,
-          }),
-        })
-        if (loginRes.ok) {
-          const loginData = await loginRes.json()
-          const newToken = loginData.accessToken || loginData.token
-          if (newToken) {
-            localStorage.setItem(ADMIN_TOKEN_KEY, newToken)
-            if (loginData.refreshToken) localStorage.setItem('orvexa_refresh_token', loginData.refreshToken)
-            return newToken
-          }
-        }
-      } catch {
-        // auto-login failed
-      }
-    }
-
+    // Never fall back to logging in with stored or demo credentials: a session that cannot be
+    // refreshed must sign in again.
     return null
   },
 

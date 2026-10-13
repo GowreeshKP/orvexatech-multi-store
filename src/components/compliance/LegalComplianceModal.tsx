@@ -224,10 +224,10 @@ export function LegalComplianceModal({
 
               <div>
                 <h3 className={`text-base font-bold mb-1.5 ${isDark ? 'text-white' : 'text-slate-950 font-display'}`}>
-                  2. Lawful Basis & Special Category Data
+                  2. Lawful Basis
                 </h3>
                 <p className="text-xs leading-relaxed">
-                  Processing is conducted strictly under Article 6(1)(b) (performance of contract for order fulfillment) and Article 6(1)(a) (explicit consent for marketing & consultation bookings). Clinic and specialized appointment data are treated as special category data under Article 9, safeguarded by end-to-end encryption at rest (AES-256) and in transit (TLS 1.3).
+                  Processing is conducted under Article 6(1)(b) (performance of contract for order fulfilment) and Article 6(1)(a) (explicit consent for marketing). Data is sent over encrypted HTTPS connections, and each store's data is kept in its own separate database.
                 </p>
               </div>
 
@@ -352,21 +352,17 @@ export function LegalComplianceModal({
                     Digital Personal Data Protection Act (DPDP), 2023
                   </p>
                   <p className={`mt-0.5 ${isDark ? 'text-orange-300/90' : 'text-orange-900'}`}>
-                    Orvexa Tech is engineered for India's DPDP Act with sovereign Indian cloud data localization, explicit consent notices, and verifiable consent withdrawal workflows.
+                    Orvexa Tech is engineered for India's DPDP Act with clear notices on where data is processed, explicit consent notices, and verifiable consent withdrawal workflows.
                   </p>
                 </div>
               </div>
 
               <div>
                 <h3 className={`text-base font-bold mb-1.5 ${isDark ? 'text-white' : 'text-slate-950 font-display'}`}>
-                  1. Sovereign Cloud Residency (ap-south-1)
+                  1. Data Storage & Transfers
                 </h3>
                 <p className="text-xs leading-relaxed">
-                  All Indian merchant data, customer addresses, phone numbers, and payment reconciliation records are strictly stored and processed in sovereign Indian data center regions (
-                  <span className="font-mono font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                    AWS Mumbai / ap-south-1
-                  </span>
-                  ). Data is not transferred across borders except where explicitly authorized under central government regulations.
+                  Merchant data, customer addresses, phone numbers, and payment reconciliation records are stored with our hosting and service providers. Where personal data is processed outside India, we do so only as permitted under the DPDP Act and any restrictions notified by the central government. Contact the Grievance Redressal Officer for the current list of processing locations.
                 </p>
               </div>
 
@@ -492,7 +488,7 @@ export function LegalComplianceModal({
                   3. Security Standards
                 </h4>
                 <p className="text-xs leading-relaxed">
-                  We employ bank-grade security: AES-256 database encryption at rest, TLS 1.3 in-transit encryption, automated rate limiting, dual-token JWT authentication with token rotation, and 24/7 DDoS mitigation.
+                  Every store uses the same security baseline: encrypted HTTPS connections, a separate database per store, automated rate limiting, and short-lived sign-in tokens with single-use refresh tokens that are revoked on password change or suspension.
                 </p>
               </div>
             </div>

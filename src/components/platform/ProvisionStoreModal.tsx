@@ -5,6 +5,9 @@
 import { useState } from 'react'
 import { authService } from '@/api/auth'
 import { auditLogger } from '@/api/audit-logger'
+import { getNichePreset } from '@/data/store-niches'
+import StoreTypePicker from '@/components/platform/StoreTypePicker'
+import { PLAN_CATALOG, PLAN_IDS, formatPlanPrice } from '@/data/plans'
 import type { TenantConfig } from '@/types/tenant'
 
 interface Props {
@@ -18,6 +21,8 @@ interface Props {
     ownerPhone?: string
     plan?: 'starter' | 'pro' | 'enterprise'
     niche?: string
+    storeType?: string
+    categories?: string[]
     primaryColor?: string
     accentColor?: string
     customDomain?: string
@@ -32,7 +37,8 @@ export default function ProvisionStoreModal({ isOpen, onClose, onProvision, onSu
   const [ownerEmail, setOwnerEmail] = useState('')
   const [ownerPhone, setOwnerPhone] = useState('')
   const [plan, setPlan] = useState<'starter' | 'pro' | 'enterprise'>('starter')
-  const [niche, setNiche] = useState('Fashion & Apparel')
+  const [storeType, setStoreType] = useState('fashion')
+  const [categories, setCategories] = useState<string[]>(() => [...getNichePreset('fashion').categories])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -55,6 +61,10 @@ export default function ProvisionStoreModal({ isOpen, onClose, onProvision, onSu
       setError('Please fill in all required fields.')
       return
     }
+    if (categories.length === 0) {
+      setError('Add at least one store category.')
+      return
+    }
 
     setIsSubmitting(true)
     try {
@@ -66,7 +76,9 @@ export default function ProvisionStoreModal({ isOpen, onClose, onProvision, onSu
         ownerEmail: ownerEmail.trim().toLowerCase(),
         ownerPhone: ownerPhone.trim(),
         plan,
-        niche,
+        niche: getNichePreset(storeType).label,
+        storeType,
+        categories,
       })
 
       // 2. Automatically dispatch zero-knowledge password reset email to store owner
@@ -154,20 +166,20 @@ export default function ProvisionStoreModal({ isOpen, onClose, onProvision, onSu
 
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Subdomain Slug *
+                Store portal slug *
               </label>
               <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-slate-400 pointer-events-none">
+                  orvexacloud.in/t/
+                </span>
                 <input
                   type="text"
                   required
                   value={slug}
                   onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                  placeholder="e.g. auraluxe"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-blue-700 font-mono font-bold placeholder-slate-400 outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all pr-24"
+                  placeholder="auraluxe"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-[7.75rem] pr-3.5 py-2.5 text-xs text-blue-700 font-mono font-bold placeholder-slate-400 outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all"
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-slate-400 pointer-events-none">
-                  .orvexatech.com
-                </span>
               </div>
             </div>
           </div>
@@ -203,38 +215,29 @@ export default function ProvisionStoreModal({ isOpen, onClose, onProvision, onSu
             </div>
           </div>
 
-          {/* Phone & Category */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Owner WhatsApp / Phone
-              </label>
-              <input
-                type="text"
-                value={ownerPhone}
-                onChange={(e) => setOwnerPhone(e.target.value)}
-                placeholder="e.g. +91 98765 43210"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all font-mono"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Niche / Category
-              </label>
-              <select
-                value={niche}
-                onChange={(e) => setNiche(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 outline-none focus:bg-white focus:border-blue-500 transition-all cursor-pointer"
-              >
-                <option value="Fashion & Apparel">Fashion & Apparel</option>
-                <option value="Handloom & Traditional">Handloom & Traditional Weaves</option>
-                <option value="Jewelry & Accessories">Jewelry & Accessories</option>
-                <option value="Organic & Sustainable">Organic & Sustainable</option>
-                <option value="Artisanal & Luxury">Artisanal & Luxury Goods</option>
-              </select>
-            </div>
+          {/* Phone */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Owner WhatsApp / Phone
+            </label>
+            <input
+              type="text"
+              value={ownerPhone}
+              onChange={(e) => setOwnerPhone(e.target.value)}
+              placeholder="e.g. +91 98765 43210"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 placeholder-slate-400 outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 transition-all font-mono"
+            />
           </div>
+
+          {/* Store Type & Categories */}
+          <StoreTypePicker
+            storeType={storeType}
+            categories={categories}
+            onChange={(type, cats) => {
+              setStoreType(type)
+              setCategories(cats)
+            }}
+          />
 
           {/* Subscription Plan Tier */}
           <div className="space-y-2">
@@ -242,11 +245,12 @@ export default function ProvisionStoreModal({ isOpen, onClose, onProvision, onSu
               Subscription Plan
             </label>
             <div className="grid grid-cols-3 gap-3">
-              {[
-                { id: 'starter', name: 'Starter', price: '₹999/mo', desc: '100% Isolated DB' },
-                { id: 'pro', name: 'Pro', price: '₹2,499/mo', desc: 'Custom Domain + SSL' },
-                { id: 'enterprise', name: 'Enterprise', price: '₹4,999/mo', desc: 'Dedicated Cluster' },
-              ].map((p) => (
+              {PLAN_IDS.map((id) => ({
+                id,
+                name: PLAN_CATALOG[id].label,
+                price: formatPlanPrice(PLAN_CATALOG[id].pricePerMonth),
+                desc: PLAN_CATALOG[id].highlight,
+              })).map((p) => (
                 <button
                   type="button"
                   key={p.id}

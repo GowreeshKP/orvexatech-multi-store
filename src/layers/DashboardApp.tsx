@@ -4,8 +4,28 @@ import { useDashboardStats, useDashboardProducts, useTenantOrders, useThemeCusto
 import { authService, type SellerSession } from '@/api/auth'
 import { mockStore } from '@/api/mock-store'
 import { auditLogger } from '@/api/audit-logger'
+import { PLAN_CATALOG, formatPlanPrice, normalizePlanId, storeAddress } from '@/data/plans'
+import { tenantPortalPath } from '@/lib/store-urls'
+import { fetchStoreAnalytics, fetchDomainConfig, saveCustomDomain } from '@/api/storefront-analytics'
+import { storeInbox, STORE_INBOX_EVENT, type NewsletterSubscriber, type StoreMessage } from '@/api/store-messages'
 import SellerLogin from '@/components/auth/SellerLogin'
 import StoreAuditLogs from '@/components/store/StoreAuditLogs'
+import StorefrontContentEditor, {
+  extrasToTheme,
+  getInitialExtras,
+  type ContentEditorTab,
+  type StorefrontExtras,
+} from '@/components/store/StorefrontContentEditor'
+import {
+  buildTenantCategories,
+  getCategoryLabel,
+  getDefaultStorefrontCopy,
+  getNichePreset,
+  HOME_SECTIONS,
+  getStoreCategories,
+  isTemplateStore,
+  type StoreCategory,
+} from '@/data/store-niches'
 import type { Product } from '@/types'
 import type { TenantConfig, ThemeConfig, TrackedOrder } from '@/types/tenant'
 
@@ -14,6 +34,7 @@ const NAV_ITEMS = [
   { id: 'overview', label: 'Dashboard', icon: '📊' },
   { id: 'products', label: 'Products & Inventory', icon: '🏷️' },
   { id: 'orders', label: 'Orders & Shipments', icon: '📦' },
+  { id: 'inbox', label: 'Inbox & Subscribers', icon: '✉️' },
   { id: 'storefront', label: 'Storefront & Homepage', icon: '🎨' },
   { id: 'database', label: 'Database & MongoDB', icon: '🗄️' },
   { id: 'audit', label: 'Security & Audit Log', icon: '🛡️' },
@@ -178,7 +199,7 @@ export default function DashboardApp() {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-white truncate">{tenant?.brandName || 'My Store'}</p>
               <p className="text-[10px] font-mono uppercase tracking-wider truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                {session.name}
+                {tenant?.ownerName || session.name}
               </p>
             </div>
           )}
@@ -231,7 +252,7 @@ export default function DashboardApp() {
         {/* Quick Links & Sign Out */}
         <div className="p-3 space-y-1 flex-shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
           <a
-            href={`/?tenant=${tenant?.slug || 'lunar'}`}
+            href={tenantPortalPath(tenant?.slug || '')}
             target="_blank"
             rel="noopener noreferrer"
             className={`flex items-center gap-2 text-[11px] font-bold tracking-wider px-3 py-2.5 rounded-lg transition-all ${
@@ -270,7 +291,7 @@ export default function DashboardApp() {
             </h1>
             <span className="hidden sm:inline-block text-xs" style={{ color: 'rgba(0,0,0,0.2)' }}>|</span>
             <span className="hidden sm:inline-block text-xs font-mono" style={{ color: 'rgba(0,0,0,0.4)' }}>
-              {tenant?.brandName} ({tenant?.slug}.orvexatech.com)
+              {tenant?.brandName} ({storeAddress(tenant?.slug || '')})
             </span>
           </div>
 
@@ -303,6 +324,7 @@ export default function DashboardApp() {
           {activeView === 'overview' && <DashboardOverview onNavigate={(view) => setActiveView(view)} />}
           {activeView === 'products' && <ProductManager onToast={showToast} />}
           {activeView === 'orders' && <OrderManager onToast={showToast} />}
+          {activeView === 'inbox' && <InboxManager onToast={showToast} />}
           {activeView === 'storefront' && <StorefrontCustomizer onToast={showToast} />}
           {activeView === 'database' && <DatabaseManager onToast={showToast} />}
           {activeView === 'audit' && tenant && <StoreAuditLogs tenant={tenant} onToast={showToast} />}
@@ -319,6 +341,14 @@ export default function DashboardApp() {
 function DashboardOverview({ onNavigate }: { onNavigate: (view: DashboardView) => void }) {
   const { stats, loading } = useDashboardStats()
   const { tenant } = useTenant()
+  const [traffic, setTraffic] = useState<{ pageViews: number; visitors: number; signIns: number; orders: number } | null>(null)
+
+  useEffect(() => {
+    if (!tenant?.slug) return
+    fetchStoreAnalytics(tenant.slug, 7).then((data) => {
+      if (data) setTraffic({ pageViews: data.pageViews, visitors: data.visitors, signIns: data.signIns, orders: data.orders })
+    }).catch(() => undefined)
+  }, [tenant?.slug])
 
   if (loading || !stats) {
     return (
@@ -330,12 +360,23 @@ function DashboardOverview({ onNavigate }: { onNavigate: (view: DashboardView) =
     )
   }
 
-  const kpis = [
-    { label: 'Total Revenue', value: `₹${stats.revenue.toLocaleString()}`, change: `+${stats.revenueChange}%`, icon: '💰', trend: 'up', glowClass: 'kpi-card-glow-green', sparkData: [40,55,42,70,58,80,95] },
-    { label: 'Total Orders', value: stats.orderCount.toString(), change: `+${stats.orderCountChange}%`, icon: '📦', trend: 'up', glowClass: 'kpi-card-glow-blue', sparkData: [20,35,28,45,38,55,62] },
-    { label: 'Avg Order Value', value: `₹${Math.round(stats.averageOrderValue).toLocaleString()}`, change: 'Healthy', icon: '📈', trend: 'neutral', glowClass: 'kpi-card-glow-violet', sparkData: [65,70,68,72,70,75,78] },
-    { label: 'Total Customers', value: (stats.customerCount || 28).toString(), change: '+4 this week', icon: '👥', trend: 'up', glowClass: 'kpi-card-glow-amber', sparkData: [10,14,12,18,15,22,28] },
-  ]
+  const isTemplate = isTemplateStore(tenant)
+  const dailyRevenue = stats.revenueByDay.map((d) => d.amount)
+  const dailyOrders = stats.revenueByDay.map((d) => d.orders || 0)
+  const dailyAov = stats.revenueByDay.map((d) => (d.orders ? d.amount / d.orders : 0))
+  const kpis = isTemplate
+    ? [
+        { label: 'Total Revenue', value: `₹${stats.revenue.toLocaleString()}`, change: '', icon: '💰', trend: 'neutral', glowClass: 'kpi-card-glow-green', sparkData: dailyRevenue },
+        { label: 'Total Orders', value: stats.orderCount.toString(), change: '', icon: '📦', trend: 'neutral', glowClass: 'kpi-card-glow-blue', sparkData: dailyOrders },
+        { label: 'Avg Order Value', value: `₹${Math.round(stats.averageOrderValue).toLocaleString()}`, change: '', icon: '📈', trend: 'neutral', glowClass: 'kpi-card-glow-violet', sparkData: dailyAov },
+        { label: 'Total Customers', value: stats.customerCount.toString(), change: '', icon: '👥', trend: 'neutral', glowClass: 'kpi-card-glow-amber', sparkData: dailyOrders },
+      ]
+    : [
+        { label: 'Total Revenue', value: `₹${stats.revenue.toLocaleString()}`, change: `+${stats.revenueChange}%`, icon: '💰', trend: 'up', glowClass: 'kpi-card-glow-green', sparkData: [40,55,42,70,58,80,95] },
+        { label: 'Total Orders', value: stats.orderCount.toString(), change: `+${stats.orderCountChange}%`, icon: '📦', trend: 'up', glowClass: 'kpi-card-glow-blue', sparkData: [20,35,28,45,38,55,62] },
+        { label: 'Avg Order Value', value: `₹${Math.round(stats.averageOrderValue).toLocaleString()}`, change: 'Healthy', icon: '📈', trend: 'neutral', glowClass: 'kpi-card-glow-violet', sparkData: [65,70,68,72,70,75,78] },
+        { label: 'Total Customers', value: (stats.customerCount || 28).toString(), change: '+4 this week', icon: '👥', trend: 'up', glowClass: 'kpi-card-glow-amber', sparkData: [10,14,12,18,15,22,28] },
+      ]
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -348,7 +389,9 @@ function DashboardOverview({ onNavigate }: { onNavigate: (view: DashboardView) =
           <span className="text-[10px] font-mono tracking-[0.25em]" style={{ color: 'rgba(139,92,246,0.8)' }}>SELLER PORTAL • ORVEXA PLATFORM</span>
           <h2 className="text-xl md:text-2xl mt-1" style={{ fontFamily: 'var(--font-display)' }}>Welcome back, {tenant?.ownerName || 'Merchant'}! 👋</h2>
           <p className="text-xs mt-1 max-w-xl" style={{ color: 'rgba(255,255,255,0.55)' }}>
-            Manage catalog, upload images, customize homepage banners, and track real-time orders for <strong style={{ color: 'rgba(255,255,255,0.85)' }}>{tenant?.brandName}</strong>.
+            Manage catalog, homepage and orders. Live storefront:{' '}
+            <strong style={{ color: 'rgba(255,255,255,0.85)' }}>{storeAddress(tenant?.slug || '')}</strong>
+            {tenant?.customDomain ? ` · custom ${tenant.customDomain}` : ''}
           </p>
         </div>
         <div className="flex gap-3 flex-wrap">
@@ -387,19 +430,38 @@ function DashboardOverview({ onNavigate }: { onNavigate: (view: DashboardView) =
             </div>
             {/* Sparkline mini chart */}
             <div className="flex items-end gap-0.5 h-8 mb-3">
-              {kpi.sparkData.map((val, idx) => (
-                <div
-                  key={idx}
-                  className="flex-1 rounded-sm sparkline-bar"
-                  style={{ height: `${(val / Math.max(...kpi.sparkData)) * 100}%`, background: idx === kpi.sparkData.length - 1 ? '#6366f1' : 'rgba(99,102,241,0.2)' }}
-                />
-              ))}
+              {kpi.sparkData.map((val, idx) => {
+                const max = Math.max(...kpi.sparkData)
+                return (
+                  <div
+                    key={idx}
+                    className="flex-1 rounded-sm sparkline-bar"
+                    style={{ height: `${max > 0 ? Math.max((val / max) * 100, 6) : 6}%`, background: val > 0 && idx === kpi.sparkData.length - 1 ? '#6366f1' : 'rgba(99,102,241,0.2)' }}
+                  />
+                )
+              })}
             </div>
             <p className="text-2xl font-bold text-black animate-count-up">{kpi.value}</p>
             <p className="text-[10px] text-black/40 font-bold tracking-widest uppercase mt-0.5">{kpi.label}</p>
           </div>
         ))}
       </div>
+
+      {traffic && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: 'Storefront visits (7d)', value: traffic.visitors },
+            { label: 'Page views (7d)', value: traffic.pageViews },
+            { label: 'Shopper sign-ins (7d)', value: traffic.signIns },
+            { label: 'Orders from storefront (7d)', value: traffic.orders },
+          ].map((row) => (
+            <div key={row.label} className="bg-white rounded-2xl p-4 border border-black/6 shadow-sm">
+              <p className="text-2xl font-bold text-black">{row.value.toLocaleString()}</p>
+              <p className="text-[10px] text-black/40 font-bold tracking-widest uppercase mt-1">{row.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Revenue Chart - Full Width SVG Area Chart */}
       <div className="bg-white rounded-2xl p-6 border border-black/6 shadow-sm">
@@ -409,16 +471,18 @@ function DashboardOverview({ onNavigate }: { onNavigate: (view: DashboardView) =
             <h3 className="text-sm font-bold text-black mt-0.5">Last 7 Days Performance</h3>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-full">
-              ↑ +18.4% vs last period
-            </span>
+            {!isTemplate && (
+              <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-full">
+                ↑ +18.4% vs last period
+              </span>
+            )}
           </div>
         </div>
         {/* SVG Bar Chart with gradient */}
         <div className="flex items-end gap-3 h-52 pt-6">
           {stats.revenueByDay.map((day, idx) => {
             const maxAmount = Math.max(...stats.revenueByDay.map((d) => d.amount)) || 1
-            const height = Math.max(8, (day.amount / maxAmount) * 100)
+            const height = Math.max(isTemplate ? 2 : 8, (day.amount / maxAmount) * 100)
             const isLast = idx === stats.revenueByDay.length - 1
             return (
               <div key={day.date} className="flex-1 flex flex-col items-center gap-2 group cursor-default">
@@ -529,14 +593,28 @@ function DashboardOverview({ onNavigate }: { onNavigate: (view: DashboardView) =
 // =====================================================
 function ProductManager({ onToast }: { onToast: (msg: string) => void }) {
   const { products, addProduct, updateProduct, deleteProduct } = useDashboardProducts()
+  const { tenant, refreshTenant } = useTenant()
+  const isTemplate = isTemplateStore(tenant)
   const [showModal, setShowModal] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filterCategory, setFilterCategory] = useState('all')
 
-  const categories = useMemo(() => {
-    return ['all', ...Array.from(new Set(products.map((p) => p.category)))]
-  }, [products])
+  const storeCategories = useMemo(() => getStoreCategories(tenant, products), [tenant, products])
+  const categories = useMemo(() => ['all', ...storeCategories.map((c) => c.slug)], [storeCategories])
+
+  const handleAddCategory = (name: string): string | null => {
+    if (!tenant) return null
+    const existing = tenant.categories || []
+    const [created] = buildTenantCategories([name])
+    if (!created) return null
+    if (!existing.some((c) => c.slug === created.slug)) {
+      mockStore.updateTenant(tenant.id, { categories: [...existing, created] })
+      refreshTenant(tenant.slug)
+      onToast(`Added category "${created.name}".`)
+    }
+    return created.slug
+  }
 
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
@@ -586,7 +664,7 @@ function ProductManager({ onToast }: { onToast: (msg: string) => void }) {
         <div>
           <h2 className="text-lg font-bold text-black">Product Inventory</h2>
           <p className="text-xs text-black/50 mt-0.5">
-            {products.length} products published • Add images, edit pricing, fabric tech, colors and sizes.
+            {products.length} {products.length === 1 ? 'product' : 'products'} published • Add images, edit pricing, {isTemplate ? 'categories, colors and options' : 'fabric tech, colors and sizes'}.
           </p>
         </div>
 
@@ -606,7 +684,7 @@ function ProductManager({ onToast }: { onToast: (msg: string) => void }) {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by product name, fabric, or tag..."
+            placeholder={isTemplate ? 'Search by product name or tag...' : 'Search by product name, fabric, or tag...'}
             className="w-full bg-white border border-black/15 px-4 py-2.5 pl-9 text-xs rounded-lg outline-none focus:border-black transition-colors"
           />
           <span className="absolute left-3 top-2.5 text-black/40 text-xs">🔍</span>
@@ -627,7 +705,7 @@ function ProductManager({ onToast }: { onToast: (msg: string) => void }) {
         >
           {categories.map((c) => (
             <option key={c} value={c}>
-              {c === 'all' ? 'ALL CATEGORIES' : c.toUpperCase()}
+              {c === 'all' ? 'ALL CATEGORIES' : getCategoryLabel(tenant, c).toUpperCase()}
             </option>
           ))}
         </select>
@@ -637,7 +715,7 @@ function ProductManager({ onToast }: { onToast: (msg: string) => void }) {
       <div className="bg-white rounded-xl border border-black/8 shadow-sm overflow-hidden">
         {filteredProducts.length === 0 ? (
           <div className="py-16 text-center px-4">
-            <p className="text-4xl mb-3">👗</p>
+            <p className="text-4xl mb-3">{isTemplate ? getNichePreset(tenant?.storeType).icon : '👗'}</p>
             <p className="text-lg font-serif mb-1">No products found</p>
             <p className="text-xs text-black/40 mb-4">
               {searchQuery ? `No matches for "${searchQuery}"` : 'Your store has no products yet.'}
@@ -691,7 +769,7 @@ function ProductManager({ onToast }: { onToast: (msg: string) => void }) {
                     {/* Category */}
                     <td className="px-4 py-4">
                       <span className="text-[10px] bg-stone-100 border border-black/10 px-2 py-1 rounded font-bold uppercase tracking-wider text-black/70">
-                        {product.category}
+                        {getCategoryLabel(tenant, product.category)}
                       </span>
                     </td>
 
@@ -726,7 +804,7 @@ function ProductManager({ onToast }: { onToast: (msg: string) => void }) {
                           <span className="text-[9px] text-black/50">+{product.colors.length - 4}</span>
                         )}
                       </div>
-                      <p className="text-[10px] text-black/50">{product.sizes?.join(', ') || 'S, M, L, XL'}</p>
+                      <p className="text-[10px] text-black/50">{product.sizes?.join(', ') || (isTemplate ? '—' : 'S, M, L, XL')}</p>
                     </td>
 
                     {/* Rating */}
@@ -773,6 +851,9 @@ function ProductManager({ onToast }: { onToast: (msg: string) => void }) {
       {showModal && (
         <ProductFormModal
           product={editingProduct}
+          tenant={tenant}
+          categories={storeCategories}
+          onAddCategory={handleAddCategory}
           onClose={() => setShowModal(false)}
           onSave={(savedProduct) => {
             if (editingProduct) {
@@ -796,52 +877,76 @@ function ProductManager({ onToast }: { onToast: (msg: string) => void }) {
 // =====================================================
 function ProductFormModal({
   product,
+  tenant,
+  categories,
+  onAddCategory,
   onClose,
   onSave,
   nextId,
 }: {
   product: Product | null
+  tenant: TenantConfig | null
+  categories: StoreCategory[]
+  onAddCategory: (name: string) => string | null
   onClose: () => void
   onSave: (p: Product) => void
   nextId: number
 }) {
   const isEditing = !!product
+  const isTemplate = isTemplateStore(tenant)
+  const niche = getNichePreset(tenant?.storeType)
+  const sizeOptions = isTemplate ? niche.sizeOptions : ['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size']
+  const labels = isTemplate
+    ? { tag: niche.tagLabel, material: niche.materialLabel, materialDesc: niche.materialDescLabel, sizes: 'Available Options', fitNote: 'Good To Know' }
+    : { tag: 'Sculpt / Silhouette Tag', material: 'Fabric Technology / Weave', materialDesc: 'Fabric Description & Feel', sizes: 'Available Sizes', fitNote: 'Size & Fit Note' }
+  const legacyCategoryOptions: StoreCategory[] = [
+    { slug: 'maxis', name: 'Cotton Maxis', image: '' },
+    { slug: 'dresses', name: 'Silk & Chanderi Dresses', image: '' },
+    { slug: 'kalamkari', name: 'Kalamkari & Prints', image: '' },
+    { slug: 'handloom', name: 'Handloom Series', image: '' },
+  ]
+  const categoryOptions = isTemplate || tenant?.categories?.length ? categories : legacyCategoryOptions
+
   const [name, setName] = useState(product?.name || '')
-  const [category, setCategory] = useState<Product['category']>(product?.category || 'maxis')
-  const [price, setPrice] = useState(product?.price?.toString() || '1199')
-  const [originalPrice, setOriginalPrice] = useState(product?.originalPrice?.toString() || '1499')
-  const [badge, setBadge] = useState(product?.badge || 'BESTSELLER')
-  const [sculptLevel, setSculptLevel] = useState(product?.sculptLevel || 'A-LINE FLARE')
-  const [fabricTech, setFabricTech] = useState(product?.fabricTech || '100% Pure Breathable Cotton')
+  const [category, setCategory] = useState<Product['category']>(
+    product?.category || categoryOptions[0]?.slug || (isTemplate ? '' : 'maxis')
+  )
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+  const [price, setPrice] = useState(product?.price?.toString() || (isTemplate ? '' : '1199'))
+  const [originalPrice, setOriginalPrice] = useState(product?.originalPrice?.toString() || (isTemplate ? '' : '1499'))
+  const [badge, setBadge] = useState(product?.badge ?? (isTemplate ? '' : 'BESTSELLER'))
+  const [sculptLevel, setSculptLevel] = useState(product?.sculptLevel || (isTemplate ? '' : 'A-LINE FLARE'))
+  const [fabricTech, setFabricTech] = useState(product?.fabricTech || (isTemplate ? '' : '100% Pure Breathable Cotton'))
   const [fabricDesc, setFabricDesc] = useState(
-    product?.fabricDesc || 'Ultra-soft, skin-friendly woven texture that breathes all day long.'
+    product?.fabricDesc || (isTemplate ? '' : 'Ultra-soft, skin-friendly woven texture that breathes all day long.')
   )
   const [desc, setDesc] = useState(
-    product?.desc || 'Handcrafted pure cotton silhouette designed for effortless elegance and all-day comfort.'
+    product?.desc || (isTemplate ? '' : 'Handcrafted pure cotton silhouette designed for effortless elegance and all-day comfort.')
   )
   const [fitInfo, setFitInfo] = useState(
-    product?.fitInfo || 'True to size with adjustable attached side tie-up ropes.'
+    product?.fitInfo || (isTemplate ? '' : 'True to size with adjustable attached side tie-up ropes.')
   )
+  const [highlights, setHighlights] = useState((product?.details || []).join('\n'))
+
+  const defaultImage = isTemplate ? '' : 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243'
 
   // Primary image
-  const [imgMain, setImgMain] = useState(
-    product?.imgMain || 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243'
-  )
+  const [imgMain, setImgMain] = useState(product?.imgMain || defaultImage)
 
   // Additional gallery images
   const [images, setImages] = useState<string[]>(
     product?.images && product.images.length > 0
       ? product.images
-      : [
-          product?.imgMain ||
-            'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243',
-        ]
+      : [product?.imgMain || defaultImage].filter(Boolean)
   )
 
   // Color options
   const [colors, setColors] = useState<{ name: string; hex: string }[]>(
     product?.colors && product.colors.length > 0
       ? product.colors
+      : isTemplate
+      ? []
       : [
           { name: 'Indigo Black', hex: '#222222' },
           { name: 'Rose Clay', hex: '#8C5A4F' },
@@ -850,11 +955,19 @@ function ProductFormModal({
 
   // Available Sizes
   const [sizes, setSizes] = useState<string[]>(
-    product?.sizes && product.sizes.length > 0 ? product.sizes : ['XS', 'S', 'M', 'L', 'XL', 'XXL']
+    product?.sizes && product.sizes.length > 0 ? product.sizes : isTemplate ? [] : ['XS', 'S', 'M', 'L', 'XL', 'XXL']
   )
 
   const [activeTab, setActiveTab] = useState<'info' | 'images' | 'variants' | 'craft'>('info')
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleCreateCategory = () => {
+    const name = newCategoryName.trim()
+    if (!name) return
+    const slug = onAddCategory(name)
+    if (slug) setCategory(slug)
+    setNewCategoryName('')
+  }
 
   // Handle local image file upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -898,7 +1011,7 @@ function ProductFormModal({
 
   const handleToggleSize = (size: string) => {
     if (sizes.includes(size)) {
-      if (sizes.length > 1) setSizes(sizes.filter((s) => s !== size))
+      if (isTemplate || sizes.length > 1) setSizes(sizes.filter((s) => s !== size))
     } else {
       setSizes([...sizes, size])
     }
@@ -906,7 +1019,22 @@ function ProductFormModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!name || !price) return
+    if (!name || !price) {
+      setFormError('Product name and price are required.')
+      setActiveTab('info')
+      return
+    }
+    if (!category) {
+      setFormError('Choose or create a category for this product.')
+      setActiveTab('info')
+      return
+    }
+    if (!imgMain && images.length === 0) {
+      setFormError('Add at least one product photo.')
+      setActiveTab('images')
+      return
+    }
+    setFormError(null)
 
     const priceNum = parseInt(price) || 999
     const origPriceNum = originalPrice ? parseInt(originalPrice) : undefined
@@ -924,19 +1052,21 @@ function ProductFormModal({
       fabricDesc,
       compression: sculptLevel,
       desc,
-      details: [
-        'Functional utility side pocket',
-        'Attached adjustable side waist tie-up ropes',
-        'Custom feeding zips available upon request',
-        'Pre-washed and pre-shrunk cotton fabric',
-      ],
+      details: isTemplate
+        ? highlights.split('\n').map((d) => d.trim()).filter(Boolean)
+        : [
+            'Functional utility side pocket',
+            'Attached adjustable side waist tie-up ropes',
+            'Custom feeding zips available upon request',
+            'Pre-washed and pre-shrunk cotton fabric',
+          ],
       fitInfo,
-      rating: product?.rating || 4.9,
-      reviewsCount: product?.reviewsCount || 12,
+      rating: product?.rating || (isTemplate ? 0 : 4.9),
+      reviewsCount: product?.reviewsCount || (isTemplate ? 0 : 12),
       imgMain: imgMain || images[0],
       images: images.length > 0 ? images : [imgMain],
-      colors: colors.length > 0 ? colors : [{ name: 'Standard', hex: '#333333' }],
-      sizes: sizes.length > 0 ? sizes : ['S', 'M', 'L', 'XL'],
+      colors: colors.length > 0 ? colors : isTemplate ? [] : [{ name: 'Standard', hex: '#333333' }],
+      sizes: sizes.length > 0 ? sizes : isTemplate ? [] : ['S', 'M', 'L', 'XL'],
     }
 
     onSave(finalProduct)
@@ -963,8 +1093,8 @@ function ProductFormModal({
           {[
             { id: 'info' as const, label: '1. Basic Info & Price' },
             { id: 'images' as const, label: '2. Photos & Gallery 📸' },
-            { id: 'variants' as const, label: '3. Colors & Sizes 🎨' },
-            { id: 'craft' as const, label: '4. Fabric & Details 🌿' },
+            { id: 'variants' as const, label: isTemplate ? '3. Colors & Options 🎨' : '3. Colors & Sizes 🎨' },
+            { id: 'craft' as const, label: isTemplate ? '4. Details 📝' : '4. Fabric & Details 🌿' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -981,6 +1111,11 @@ function ProductFormModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-6 max-h-[75vh] overflow-y-auto">
+          {formError && (
+            <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium">
+              {formError}
+            </div>
+          )}
           {/* TAB 1: BASIC INFO */}
           {activeTab === 'info' && (
             <div className="space-y-4">
@@ -993,7 +1128,7 @@ function ProductFormModal({
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Sunset Chanderi Silk Maxi Dress"
+                  placeholder={isTemplate ? 'e.g. Product name' : 'e.g. Sunset Chanderi Silk Maxi Dress'}
                   className="w-full border border-black/20 px-4 py-2.5 text-sm rounded-lg focus:border-black outline-none font-medium"
                 />
               </div>
@@ -1005,14 +1140,40 @@ function ProductFormModal({
                   </label>
                   <select
                     value={category}
-                    onChange={(e) => setCategory(e.target.value as Product['category'])}
+                    onChange={(e) => setCategory(e.target.value)}
                     className="w-full border border-black/20 px-3 py-2.5 text-xs font-bold uppercase rounded-lg focus:border-black outline-none bg-white cursor-pointer"
                   >
-                    <option value="maxis">Cotton Maxis</option>
-                    <option value="dresses">Silk & Chanderi Dresses</option>
-                    <option value="kalamkari">Kalamkari & Prints</option>
-                    <option value="handloom">Handloom Series</option>
+                    {categoryOptions.length === 0 && <option value="">No categories yet</option>}
+                    {categoryOptions.map((c) => (
+                      <option key={c.slug} value={c.slug}>
+                        {c.name}
+                      </option>
+                    ))}
                   </select>
+                  {isTemplate && (
+                    <div className="flex gap-1.5 mt-1.5">
+                      <input
+                        type="text"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleCreateCategory()
+                          }
+                        }}
+                        placeholder="New category"
+                        className="flex-1 min-w-0 border border-black/15 px-2 py-1 text-[11px] rounded focus:border-black outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCreateCategory}
+                        className="text-[10px] font-bold uppercase px-2 py-1 border border-black/20 rounded hover:bg-stone-100 cursor-pointer"
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1024,7 +1185,7 @@ function ProductFormModal({
                     required
                     value={price}
                     onChange={(e) => setPrice(e.target.value)}
-                    placeholder="1199"
+                    placeholder="e.g. 499"
                     className="w-full border border-black/20 px-4 py-2.5 text-sm font-bold rounded-lg focus:border-black outline-none"
                   />
                 </div>
@@ -1037,7 +1198,7 @@ function ProductFormModal({
                     type="number"
                     value={originalPrice}
                     onChange={(e) => setOriginalPrice(e.target.value)}
-                    placeholder="1499"
+                    placeholder="Optional"
                     className="w-full border border-black/20 px-4 py-2.5 text-sm rounded-lg focus:border-black outline-none text-black/60"
                   />
                 </div>
@@ -1064,13 +1225,13 @@ function ProductFormModal({
 
                 <div>
                   <label className="text-xs font-bold uppercase tracking-wider text-black/60 mb-1 block">
-                    Sculpt / Silhouette Tag
+                    {labels.tag}
                   </label>
                   <input
                     type="text"
                     value={sculptLevel}
                     onChange={(e) => setSculptLevel(e.target.value)}
-                    placeholder="e.g. A-LINE FLARE"
+                    placeholder={isTemplate ? `e.g. ${niche.tagLabel}` : 'e.g. A-LINE FLARE'}
                     className="w-full border border-black/20 px-4 py-2.5 text-xs font-bold uppercase rounded-lg focus:border-black outline-none"
                   />
                 </div>
@@ -1084,7 +1245,7 @@ function ProductFormModal({
                   rows={3}
                   value={desc}
                   onChange={(e) => setDesc(e.target.value)}
-                  placeholder="Describe your product styling, silhouette and appeal..."
+                  placeholder={isTemplate ? 'Describe your product and what makes it great...' : 'Describe your product styling, silhouette and appeal...'}
                   className="w-full border border-black/20 px-4 py-2.5 text-xs rounded-lg focus:border-black outline-none"
                 />
               </div>
@@ -1097,7 +1258,14 @@ function ProductFormModal({
               {/* Primary Image Display & Controls */}
               <div className="border border-black/10 rounded-xl p-5 bg-stone-50/70 flex flex-col md:flex-row items-center gap-6">
                 <div className="relative w-36 h-48 rounded-lg overflow-hidden bg-stone-200 border-2 border-black flex-shrink-0 shadow-md">
-                  <img src={imgMain} alt="Primary preview" className="w-full h-full object-cover" />
+                  {imgMain ? (
+                    <img src={imgMain} alt="Primary preview" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-black/40 text-[11px] font-semibold gap-1">
+                      <span className="text-2xl">📷</span>
+                      No photo yet
+                    </div>
+                  )}
                   <span className="absolute bottom-1 right-1 bg-black text-white text-[8px] font-bold px-1.5 py-0.5 rounded uppercase">
                     MAIN PHOTO
                   </span>
@@ -1106,7 +1274,9 @@ function ProductFormModal({
                 <div className="flex-1 space-y-3 w-full">
                   <h4 className="text-sm font-bold text-black uppercase tracking-wider">Primary Display Picture</h4>
                   <p className="text-xs text-black/60">
-                    Upload an image file directly from your computer, type an image URL, or pick from our curated fashion gallery below.
+                    {isTemplate
+                      ? 'Upload an image file directly from your computer or paste an image URL.'
+                      : 'Upload an image file directly from your computer, type an image URL, or pick from our curated fashion gallery below.'}
                   </p>
 
                   <div className="flex flex-wrap gap-2 pt-1">
@@ -1132,9 +1302,10 @@ function ProductFormModal({
                     <input
                       type="url"
                       value={imgMain}
-                      onChange={(e) => {
-                        setImgMain(e.target.value)
-                        if (!images.includes(e.target.value)) setImages([e.target.value, ...images])
+                      onChange={(e) => setImgMain(e.target.value)}
+                      onBlur={(e) => {
+                        const url = e.target.value.trim()
+                        if (url && !images.includes(url)) setImages([url, ...images])
                       }}
                       placeholder="https://..."
                       className="w-full border border-black/20 px-3 py-1.5 text-xs rounded font-mono outline-none focus:border-black bg-white"
@@ -1177,7 +1348,8 @@ function ProductFormModal({
                 </div>
               </div>
 
-              {/* Curated 1-Click Fashion Photo Presets */}
+              {/* Curated 1-Click Fashion Photo Presets (Lunar demo stores only) */}
+              {!isTemplate && (
               <div className="border-t border-black/10 pt-4">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-black mb-1">
                   Or Pick From Curated Studio Presets
@@ -1207,6 +1379,7 @@ function ProductFormModal({
                   ))}
                 </div>
               </div>
+              )}
             </div>
           )}
 
@@ -1233,9 +1406,7 @@ function ProductFormModal({
                         type="color"
                         value={c.hex}
                         onChange={(e) => {
-                          const updated = [...colors]
-                          updated[i].hex = e.target.value
-                          setColors(updated)
+                          setColors(colors.map((col, idx) => (idx === i ? { ...col, hex: e.target.value } : col)))
                         }}
                         className="w-8 h-8 rounded border border-black/20 cursor-pointer"
                       />
@@ -1243,9 +1414,7 @@ function ProductFormModal({
                         type="text"
                         value={c.name}
                         onChange={(e) => {
-                          const updated = [...colors]
-                          updated[i].name = e.target.value
-                          setColors(updated)
+                          setColors(colors.map((col, idx) => (idx === i ? { ...col, name: e.target.value } : col)))
                         }}
                         placeholder="Color Name (e.g. Royal Indigo)"
                         className="flex-1 border border-black/20 px-3 py-1.5 text-xs rounded bg-white outline-none"
@@ -1266,10 +1435,13 @@ function ProductFormModal({
               {/* Sizes */}
               <div>
                 <label className="text-xs font-bold uppercase tracking-wider text-black mb-2 block">
-                  Available Sizes
+                  {labels.sizes}
                 </label>
+                {isTemplate && (
+                  <p className="text-[11px] text-black/50 mb-2">Optional — leave all unselected if this product has a single option.</p>
+                )}
                 <div className="flex flex-wrap gap-2">
-                  {['XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size'].map((sz) => (
+                  {sizeOptions.map((sz) => (
                     <button
                       key={sz}
                       type="button"
@@ -1289,13 +1461,13 @@ function ProductFormModal({
               {/* Fit Info */}
               <div>
                 <label className="text-xs font-bold uppercase tracking-wider text-black/60 mb-1 block">
-                  Size & Fit Note
+                  {labels.fitNote}
                 </label>
                 <input
                   type="text"
                   value={fitInfo}
                   onChange={(e) => setFitInfo(e.target.value)}
-                  placeholder="e.g. True to size with adjustable waist tie-ups."
+                  placeholder={isTemplate ? 'e.g. Recommended for ages 3+' : 'e.g. True to size with adjustable waist tie-ups.'}
                   className="w-full border border-black/20 px-4 py-2.5 text-xs rounded-lg focus:border-black outline-none"
                 />
               </div>
@@ -1307,39 +1479,54 @@ function ProductFormModal({
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-bold uppercase tracking-wider text-black/60 mb-1 block">
-                  Fabric Technology / Weave *
+                  {labels.material}{isTemplate ? '' : ' *'}
                 </label>
                 <input
                   type="text"
-                  required
+                  required={!isTemplate}
                   value={fabricTech}
                   onChange={(e) => setFabricTech(e.target.value)}
-                  placeholder="e.g. 100% Pure Mul Chanderi Silk"
+                  placeholder={isTemplate ? `e.g. ${niche.materialLabel}` : 'e.g. 100% Pure Mul Chanderi Silk'}
                   className="w-full border border-black/20 px-4 py-2.5 text-sm rounded-lg focus:border-black outline-none font-semibold"
                 />
               </div>
 
               <div>
                 <label className="text-xs font-bold uppercase tracking-wider text-black/60 mb-1 block">
-                  Fabric Description & Feel
+                  {labels.materialDesc}
                 </label>
                 <textarea
                   rows={3}
                   value={fabricDesc}
                   onChange={(e) => setFabricDesc(e.target.value)}
-                  placeholder="e.g. Breathable organic cotton pre-washed for zero shrinkages."
+                  placeholder={isTemplate ? 'Describe the quality, feel or what makes it special.' : 'e.g. Breathable organic cotton pre-washed for zero shrinkages.'}
                   className="w-full border border-black/20 px-4 py-2.5 text-xs rounded-lg focus:border-black outline-none"
                 />
               </div>
 
-              <div className="bg-stone-50 border border-black/10 p-4 rounded-lg">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-black mb-1">
-                  Automatic Add-on Options Active on PDP
-                </h4>
-                <p className="text-[11px] text-black/60 leading-relaxed">
-                  ✓ Custom Lining (+₹100) &nbsp;•&nbsp; ✓ Maternity Double Feeding Zip (+₹120) &nbsp;•&nbsp; ✓ Custom Lengths (44"–50")
-                </p>
-              </div>
+              {isTemplate ? (
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-black/60 mb-1 block">
+                    Highlights (one per line)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={highlights}
+                    onChange={(e) => setHighlights(e.target.value)}
+                    placeholder={'e.g. Gift-ready packaging\nMade with safe materials'}
+                    className="w-full border border-black/20 px-4 py-2.5 text-xs rounded-lg focus:border-black outline-none"
+                  />
+                </div>
+              ) : (
+                <div className="bg-stone-50 border border-black/10 p-4 rounded-lg">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-black mb-1">
+                    Automatic Add-on Options Active on PDP
+                  </h4>
+                  <p className="text-[11px] text-black/60 leading-relaxed">
+                    ✓ Custom Lining (+₹100) &nbsp;•&nbsp; ✓ Maternity Double Feeding Zip (+₹120) &nbsp;•&nbsp; ✓ Custom Lengths (44"–50")
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -1374,18 +1561,25 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
   const switchLayer = useSwitchLayer()
   const [isSaved, setIsSaved] = useState(false)
 
+  const isTemplate = isTemplateStore(tenant)
+  const nicheLabel = getNichePreset(tenant?.storeType).label
+
   const [heroImage, setHeroImage] = useState(
     theme?.heroImage ||
-      'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243'
+      (isTemplate ? '' : 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243')
   )
   const [heroHeadline, setHeroHeadline] = useState(
-    theme?.heroHeadline || tenant?.tagline || 'Weightless Everyday Living in Pure Breathable Cotton.'
+    theme?.heroHeadline ||
+      tenant?.tagline ||
+      (isTemplate ? tenant?.brandName || '' : 'Weightless Everyday Living in Pure Breathable Cotton.')
   )
   const [heroSubhead, setHeroSubhead] = useState(
     theme?.heroSubhead ||
-      'Thoughtfully handcrafted silhouettes, breathable organic weaves, and heirloom prints with functional utility pockets.'
+      (isTemplate
+        ? ''
+        : 'Thoughtfully handcrafted silhouettes, breathable organic weaves, and heirloom prints with functional utility pockets.')
   )
-  const [heroCtaText, setHeroCtaText] = useState(theme?.heroCtaText || 'EXPLORE COLLECTIONS →')
+  const [heroCtaText, setHeroCtaText] = useState(theme?.heroCtaText || (isTemplate ? 'SHOP NOW →' : 'EXPLORE COLLECTIONS →'))
   const [secondaryCtaText, setSecondaryCtaText] = useState(theme?.secondaryCtaText || 'SHOP BESTSELLERS')
 
   const [primaryColor, setPrimaryColor] = useState(theme?.primaryColor || '#8C5A4F')
@@ -1393,11 +1587,13 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
   const [backgroundColor, setBackgroundColor] = useState(theme?.backgroundColor || '#FAFAF8')
   const [fontDisplay, setFontDisplay] = useState(theme?.fontDisplay || "'Instrument Serif', Georgia, serif")
 
-  const [brandName, setBrandName] = useState(tenant?.brandName || 'The Lunar Clothing')
+  const [brandName, setBrandName] = useState(tenant?.brandName || (isTemplate ? '' : 'The Lunar Clothing'))
   const [logoUrl, setLogoUrl] = useState(tenant?.logo || tenant?.theme?.logoUrl || '')
   const [announcements, setAnnouncements] = useState<string[]>(
     theme?.announcementMessages && theme.announcementMessages.length > 0
       ? theme.announcementMessages
+      : isTemplate
+      ? [`WELCOME TO ${(tenant?.brandName || '').toUpperCase()}`]
       : [
           'FREE SHIPPING IN INDIA OVER ₹999',
           'USE CODE: FESTIVE15 FOR 15% OFF YOUR ORDER',
@@ -1406,14 +1602,20 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
   )
   const [newAnnouncement, setNewAnnouncement] = useState('')
 
-  const [contactPhone, setContactPhone] = useState(tenant?.contact?.phone || '+91 98765 43210')
-  const [contactEmail, setContactEmail] = useState(tenant?.contact?.email || 'care@store.com')
+  const [contactPhone, setContactPhone] = useState(
+    tenant?.contact?.phone || (isTemplate ? tenant?.ownerPhone || '' : '+91 98765 43210')
+  )
+  const [contactEmail, setContactEmail] = useState(
+    tenant?.contact?.email || (isTemplate ? tenant?.ownerEmail || '' : 'care@store.com')
+  )
   const [contactAddress, setContactAddress] = useState(
-    tenant?.contact?.address || 'Studio: Jubilee Hills, Hyderabad & Jaipur'
+    tenant?.contact?.address || (isTemplate ? '' : 'Studio: Jubilee Hills, Hyderabad & Jaipur')
   )
   const [aboutStory, setAboutStory] = useState(
     tenant?.aboutStory ||
-      `${brandName} was born out of a desire for effortless silhouettes and bespoke artisanal craft. Each piece is crafted in India, celebrating authentic Indian textile traditions, premium fabrics, and heirloom silhouettes.`
+      (isTemplate
+        ? `${tenant?.brandName || 'Our store'} is an independent ${nicheLabel.toLowerCase()} store. Tell your customers your story here.`
+        : `${brandName} was born out of a desire for effortless silhouettes and bespoke artisanal craft. Each piece is crafted in India, celebrating authentic Indian textile traditions, premium fabrics, and heirloom silhouettes.`)
   )
 
   const [enableAnimations, setEnableAnimations] = useState(theme?.enableAnimations ?? true)
@@ -1422,6 +1624,31 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
 
   const heroFileInputRef = useRef<HTMLInputElement>(null)
   const logoFileInputRef = useRef<HTMLInputElement>(null)
+
+  const [editorTab, setEditorTab] = useState<'branding' | ContentEditorTab>('branding')
+  const [extras, setExtras] = useState<StorefrontExtras>(() => getInitialExtras(tenant, getDefaultStorefrontCopy(tenant)))
+  const updateExtras = (updates: Partial<StorefrontExtras>) => setExtras((prev) => ({ ...prev, ...updates }))
+
+  const copyDefaults = useMemo(() => {
+    const draft = tenant
+      ? {
+          ...tenant,
+          brandName: brandName || tenant.brandName,
+          theme: { ...tenant.theme, freeShippingThreshold: extras.freeShippingThreshold, shippingFee: extras.shippingFee },
+        }
+      : tenant
+    const defaults = getDefaultStorefrontCopy(draft)
+    return { ...defaults, footerTagline: heroHeadline || tenant?.tagline || defaults.footerTagline }
+  }, [tenant, brandName, heroHeadline, extras.freeShippingThreshold, extras.shippingFee])
+
+  const editorTabs: { id: 'branding' | ContentEditorTab; label: string; icon: string }[] = [
+    { id: 'branding', label: 'Branding & Hero', icon: '🖼️' },
+    { id: 'text', label: 'Headlines & Text', icon: '✍️' },
+    { id: 'layout', label: 'Homepage Layout', icon: '🧱' },
+    { id: 'pdp', label: 'Product Page', icon: '🛍️' },
+    { id: 'offers', label: 'Shipping & Offers', icon: '🏷️' },
+    { id: 'footer', label: 'Footer & Social', icon: '🔗' },
+  ]
 
   // Handle local Hero file upload
   const handleHeroFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1482,6 +1709,7 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
       enableReviews,
       enableOrderTracking,
       logoUrl,
+      ...extrasToTheme(extras),
     })
 
     // Save tenant profile updates
@@ -1497,7 +1725,7 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
         email: contactEmail,
         address: contactAddress,
         workingHours: 'Mon–Sat: 10AM – 7PM IST',
-        shippingThresholdFormatted: '₹999',
+        shippingThresholdFormatted: `${tenant?.currencySymbol || '₹'}${Math.max(0, Math.round(extras.freeShippingThreshold || 0)).toLocaleString('en-IN')}`,
       },
     })
 
@@ -1513,7 +1741,7 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
         <div>
           <h2 className="text-lg font-bold text-black">Storefront & Homepage Customizer</h2>
           <p className="text-xs text-black/50 mt-0.5">
-            Change your homepage picture, brand logo, hero headline, colors, announcements, and contact channels.
+            Edit your homepage, headlines, section layout, product page, shipping, offers and footer — then publish.
           </p>
         </div>
 
@@ -1551,9 +1779,40 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
         </div>
       )}
 
+      <div className="flex gap-2 overflow-x-auto scroll-hide pb-1" role="tablist" aria-label="Storefront editor sections">
+        {editorTabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={editorTab === t.id}
+            onClick={() => setEditorTab(t.id)}
+            className={`flex items-center gap-1.5 whitespace-nowrap text-xs font-bold uppercase tracking-wider px-4 py-2.5 rounded-lg border transition-all cursor-pointer ${
+              editorTab === t.id
+                ? 'bg-black text-white border-black shadow-sm'
+                : 'bg-white text-black/60 border-black/10 hover:border-black/40 hover:text-black'
+            }`}
+          >
+            <span>{t.icon}</span>
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left Column: Form Controls (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
+          {editorTab !== 'branding' && (
+            <StorefrontContentEditor
+              tab={editorTab}
+              value={extras}
+              defaults={copyDefaults}
+              currencySymbol={tenant?.currencySymbol || '₹'}
+              onChange={updateExtras}
+            />
+          )}
+
+          {editorTab === 'branding' && (<>
           {/* 1. HOMEPAGE PICTURE / HERO BANNER */}
           <div className="bg-white rounded-xl p-6 border border-black/8 shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-black/10 pb-3">
@@ -1568,7 +1827,14 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
 
             {/* Current Image Display & Controls */}
             <div className="relative aspect-[16/9] rounded-lg overflow-hidden bg-stone-100 border border-black/15 shadow-inner">
-              <img src={heroImage} alt="Hero banner" className="w-full h-full object-cover" />
+              {heroImage ? (
+                <img src={heroImage} alt="Hero banner" className="w-full h-full object-cover" />
+              ) : (
+                <div
+                  className="w-full h-full"
+                  style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}
+                />
+              )}
               <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent flex items-end p-4">
                 <span className="text-white text-xs font-serif truncate">{heroHeadline}</span>
               </div>
@@ -1605,7 +1871,8 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
               />
             </div>
 
-            {/* Curated Hero Presets */}
+            {/* Curated Hero Presets (Lunar demo stores only) */}
+            {!isTemplate && (
             <div>
               <label className="text-[10px] font-bold uppercase text-black/50 block mb-2">
                 Or Pick a Luxury Studio Hero Preset:
@@ -1628,6 +1895,7 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
                 ))}
               </div>
             </div>
+            )}
 
             {/* Hero Headlines */}
             <div className="space-y-3 pt-2">
@@ -1639,7 +1907,7 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
                   type="text"
                   value={heroHeadline}
                   onChange={(e) => setHeroHeadline(e.target.value)}
-                  placeholder="e.g. Weightless Everyday Living in Pure Chanderi"
+                  placeholder={isTemplate ? 'e.g. Your store headline' : 'e.g. Weightless Everyday Living in Pure Chanderi'}
                   className="w-full border border-black/20 px-4 py-2.5 text-sm font-serif rounded-lg focus:border-black outline-none"
                 />
               </div>
@@ -1965,6 +2233,7 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
               </div>
             ))}
           </div>
+          </>)}
 
           {/* Save Button */}
           <div className="pt-2">
@@ -1990,7 +2259,7 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
                 </div>
                 <span className="text-[10px] font-mono text-white/60 ml-2">
-                  https://{tenant?.slug || 'lunar'}.orvexatech.com
+                  {storeAddress(tenant?.slug || '')}
                 </span>
               </div>
               <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-bold px-2 py-0.5 rounded uppercase">
@@ -2035,7 +2304,14 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
 
               {/* Mini Hero Banner */}
               <div className="relative aspect-[4/3] overflow-hidden group">
-                <img src={heroImage} alt="Hero mockup" className="w-full h-full object-cover" />
+                {heroImage ? (
+                  <img src={heroImage} alt="Hero mockup" className="w-full h-full object-cover" />
+                ) : (
+                  <div
+                    className="w-full h-full"
+                    style={{ background: `linear-gradient(135deg, ${primaryColor}, ${accentColor})` }}
+                  />
+                )}
                 <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent flex flex-col justify-end p-5 text-white text-center">
                   <p className="text-[9px] font-sans font-bold tracking-[0.25em] text-white/70 uppercase mb-1">
                     {brandName}
@@ -2063,32 +2339,42 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
               </div>
 
               {/* Mini Trust Bar */}
-              <div className="py-2.5 px-3 bg-stone-100 border-t border-b border-black/5 flex justify-around text-[7px] font-sans font-bold uppercase text-black/60">
-                <span>🌿 100% PURE FABRIC</span>
-                <span>📦 FREE SHIPPING</span>
-                <span>💬 WHATSAPP CARE</span>
-              </div>
+              {extras.homeSections.find((s) => s.id === 'trustBar')?.visible && (
+                <div className="py-2.5 px-3 bg-stone-100 border-t border-b border-black/5 flex justify-around gap-2 text-[7px] font-sans font-bold uppercase text-black/60 overflow-hidden whitespace-nowrap">
+                  {extras.trustItems.filter((t) => t.text.trim()).slice(0, 3).map((t, i) => (
+                    <span key={i} className="truncate">
+                      {t.icon} {t.text}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <p className="px-4 pt-3 bg-white font-sans text-[10px] font-bold text-black truncate" style={{ fontFamily: fontDisplay }}>
+                {extras.copy.bestsellersTitle?.trim() || copyDefaults.bestsellersTitle}
+              </p>
 
               {/* Mini Product Cards Preview */}
-              <div className="p-4 grid grid-cols-2 gap-3 bg-white font-sans">
+              <div className="p-4 pt-2 grid grid-cols-2 gap-3 bg-white font-sans">
                 <div className="border border-black/10 rounded p-2">
                   <div className="aspect-[3/4] bg-stone-100 rounded mb-1.5 overflow-hidden">
-                    <img src={heroImage} alt="" className="w-full h-full object-cover" />
+                    {!isTemplate && <img src={heroImage} alt="" className="w-full h-full object-cover" />}
                   </div>
-                  <p className="text-[9px] font-bold truncate">{brandName} Signature</p>
+                  <p className="text-[9px] font-bold truncate">{isTemplate ? 'Your product' : `${brandName} Signature`}</p>
                   <p className="text-[8px] font-bold" style={{ color: primaryColor }}>
                     ₹1,199
                   </p>
                 </div>
                 <div className="border border-black/10 rounded p-2">
                   <div className="aspect-[3/4] bg-stone-100 rounded mb-1.5 overflow-hidden">
-                    <img
-                      src="https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2175.jpg?v=1766941862"
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
+                    {!isTemplate && (
+                      <img
+                        src="https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2175.jpg?v=1766941862"
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    )}
                   </div>
-                  <p className="text-[9px] font-bold truncate">Artisanal Edition</p>
+                  <p className="text-[9px] font-bold truncate">{isTemplate ? 'Your product' : 'Artisanal Edition'}</p>
                   <p className="text-[8px] font-bold" style={{ color: primaryColor }}>
                     ₹1,399
                   </p>
@@ -2096,11 +2382,27 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
               </div>
             </div>
 
+            {/* Homepage outline */}
+            <div className="px-4 py-3 border-t border-black/10 bg-white">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-black/40 mb-2">Homepage order</p>
+              <ol className="flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                <li className="px-2 py-0.5 rounded bg-black text-white">Hero</li>
+                {extras.homeSections
+                  .filter((s) => s.visible)
+                  .map((s) => (
+                    <li key={s.id} className="px-2 py-0.5 rounded bg-stone-100 text-black/70 border border-black/10">
+                      {HOME_SECTIONS.find((h) => h.id === s.id)?.label}
+                    </li>
+                  ))}
+                <li className="px-2 py-0.5 rounded bg-stone-800 text-white/80">Footer</li>
+              </ol>
+            </div>
+
             {/* Bottom Preview Controls */}
             <div className="p-3 bg-stone-50 border-t border-black/10 flex items-center justify-between text-xs">
               <span className="text-black/50 text-[11px]">Real-time preview</span>
               <a
-                href={`/?tenant=${tenant?.slug || 'lunar'}`}
+                href={tenantPortalPath(tenant?.slug || '')}
                 target="_blank"
                 rel="noreferrer"
                 className="text-xs font-bold text-black hover:underline"
@@ -2118,6 +2420,228 @@ function StorefrontCustomizer({ onToast }: { onToast: (msg: string) => void }) {
 // =====================================================
 // 4. Order Manager & Real-Time Tracking
 // =====================================================
+function InboxManager({ onToast }: { onToast: (msg: string) => void }) {
+  const { tenant } = useTenant()
+  const tenantId = tenant?.id || ''
+  const [tab, setTab] = useState<'messages' | 'subscribers'>('messages')
+  const [messages, setMessages] = useState<StoreMessage[]>(() => storeInbox.getMessages(tenantId))
+  const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>(() => storeInbox.getSubscribers(tenantId))
+  const [filter, setFilter] = useState<'all' | 'unread'>('all')
+  const [openId, setOpenId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const refresh = () => {
+      setMessages(storeInbox.getMessages(tenantId))
+      setSubscribers(storeInbox.getSubscribers(tenantId))
+    }
+    refresh()
+    window.addEventListener(STORE_INBOX_EVENT, refresh)
+    window.addEventListener('storage', refresh)
+    return () => {
+      window.removeEventListener(STORE_INBOX_EVENT, refresh)
+      window.removeEventListener('storage', refresh)
+    }
+  }, [tenantId])
+
+  const unreadCount = messages.filter((m) => !m.read).length
+  const visibleMessages = filter === 'unread' ? messages.filter((m) => !m.read) : messages
+
+  const toggleOpen = (m: StoreMessage) => {
+    setOpenId((prev) => (prev === m.id ? null : m.id))
+    if (!m.read) storeInbox.setRead(tenantId, m.id, true)
+  }
+
+  const exportSubscribers = () => {
+    if (subscribers.length === 0) {
+      onToast('No subscribers to export.')
+      return
+    }
+    const csv = ['Email,Subscribed At', ...subscribers.map((s) => `"${s.email}","${s.subscribedAt}"`)].join('\n')
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
+    link.setAttribute('download', `${tenant?.slug || 'store'}-subscribers.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    onToast(`Exported ${subscribers.length} subscribers to CSV!`)
+  }
+
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+  return (
+    <div className="space-y-6 max-w-7xl mx-auto">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-5 rounded-xl border border-black/8 shadow-sm">
+        <div>
+          <h2 className="text-lg font-bold text-black">Inbox & Newsletter Subscribers</h2>
+          <p className="text-xs text-black/50 mt-0.5">
+            Messages sent from your storefront contact form and emails collected by the footer newsletter.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {(['messages', 'subscribers'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors ${
+                tab === t ? 'bg-black text-white' : 'bg-black/5 text-black/60 hover:bg-black/10'
+              }`}
+            >
+              {t === 'messages' ? `Messages (${messages.length}${unreadCount ? ` · ${unreadCount} new` : ''})` : `Subscribers (${subscribers.length})`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === 'messages' ? (
+        <div className="bg-white rounded-xl border border-black/8 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-black/8">
+            <div className="flex gap-2">
+              {(['all', 'unread'] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setFilter(f)}
+                  className={`px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider cursor-pointer ${
+                    filter === f ? 'bg-violet-600 text-white' : 'text-black/50 hover:bg-black/5'
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+            {unreadCount > 0 && (
+              <button
+                type="button"
+                onClick={() => messages.filter((m) => !m.read).forEach((m) => storeInbox.setRead(tenantId, m.id, true))}
+                className="text-[11px] font-bold text-violet-600 hover:underline cursor-pointer"
+              >
+                Mark all as read
+              </button>
+            )}
+          </div>
+          {visibleMessages.length === 0 ? (
+            <div className="p-12 text-center">
+              <p className="text-3xl mb-2">📭</p>
+              <p className="text-sm font-bold text-black">{filter === 'unread' ? 'No unread messages' : 'No messages yet'}</p>
+              <p className="text-xs text-black/50 mt-1">Customer questions from your storefront's Contact form will appear here.</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-black/6">
+              {visibleMessages.map((m) => {
+                const isOpen = openId === m.id
+                return (
+                  <li key={m.id} className={m.read ? '' : 'bg-violet-50/60'}>
+                    <button type="button" onClick={() => toggleOpen(m)} className="w-full text-left px-5 py-4 flex items-start gap-4 cursor-pointer hover:bg-black/[0.02]">
+                      <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${m.read ? 'bg-transparent' : 'bg-violet-500'}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className={`text-sm truncate ${m.read ? 'text-black/70' : 'font-bold text-black'}`}>{m.name}</p>
+                          <p className="text-[11px] text-black/40 flex-shrink-0">{formatDate(m.createdAt)}</p>
+                        </div>
+                        <p className="text-xs font-semibold text-violet-700 mt-0.5">{m.subject}</p>
+                        {!isOpen && <p className="text-xs text-black/50 truncate mt-0.5">{m.message}</p>}
+                      </div>
+                    </button>
+                    {isOpen && (
+                      <div className="px-5 pb-5 pl-11 space-y-3">
+                        <p className="text-sm text-black/80 whitespace-pre-wrap leading-relaxed">{m.message}</p>
+                        <p className="text-xs text-black/50">
+                          {m.email}
+                          {m.phone ? ` · ${m.phone}` : ''}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <a
+                            href={`mailto:${m.email}?subject=${encodeURIComponent(`Re: ${m.subject}`)}`}
+                            className="px-3 py-1.5 rounded-lg bg-black text-white text-[11px] font-bold uppercase tracking-wider"
+                          >
+                            Reply by email
+                          </a>
+                          {m.phone && (
+                            <a
+                              href={`https://wa.me/${m.phone.replace(/[^0-9]/g, '').replace(/^(\d{10})$/, '91$1')}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[11px] font-bold uppercase tracking-wider"
+                            >
+                              WhatsApp
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => storeInbox.setRead(tenantId, m.id, false)}
+                            className="px-3 py-1.5 rounded-lg bg-black/5 text-black/70 text-[11px] font-bold uppercase tracking-wider cursor-pointer hover:bg-black/10"
+                          >
+                            Mark unread
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!window.confirm(`Delete the message from ${m.name}?`)) return
+                              storeInbox.deleteMessage(tenantId, m.id)
+                              setOpenId(null)
+                              onToast('Message deleted.')
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-[11px] font-bold uppercase tracking-wider cursor-pointer hover:bg-red-100"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-black/8 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-black/8">
+            <p className="text-xs text-black/50">{subscribers.length} people joined your newsletter.</p>
+            <button
+              type="button"
+              onClick={exportSubscribers}
+              className="px-3 py-1.5 rounded-lg bg-black text-white text-[11px] font-bold uppercase tracking-wider cursor-pointer"
+            >
+              Export CSV
+            </button>
+          </div>
+          {subscribers.length === 0 ? (
+            <div className="p-12 text-center">
+              <p className="text-3xl mb-2">📨</p>
+              <p className="text-sm font-bold text-black">No subscribers yet</p>
+              <p className="text-xs text-black/50 mt-1">Emails entered in your storefront footer's newsletter box will appear here.</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-black/6">
+              {subscribers.map((s) => (
+                <li key={s.email} className="px-5 py-3 flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm text-black">{s.email}</p>
+                    <p className="text-[11px] text-black/40">Joined {formatDate(s.subscribedAt)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      storeInbox.unsubscribe(tenantId, s.email)
+                      onToast(`${s.email} removed from the list.`)
+                    }}
+                    className="text-[11px] font-bold text-red-600 hover:underline cursor-pointer"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
   const { tenant } = useTenant()
   const { orders, updateOrderStatus } = useTenantOrders()
@@ -2303,7 +2827,11 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
 
                       <td className="px-4 py-4">
                         <span className="text-[11px] font-medium text-black/70 block">{order.paymentMethod || 'Prepaid'}</span>
-                        <span className="text-[9px] font-mono text-emerald-600 font-bold uppercase">PAID</span>
+                        {/cod|cash on delivery/i.test(order.paymentMethod || '') && order.status !== 'Delivered' ? (
+                          <span className="text-[9px] font-mono text-amber-600 font-bold uppercase">COLLECT ON DELIVERY</span>
+                        ) : (
+                          <span className="text-[9px] font-mono text-emerald-600 font-bold uppercase">PAID</span>
+                        )}
                       </td>
 
                       <td className="px-4 py-4">
@@ -2404,7 +2932,7 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
                         <div>
                           <p className="font-bold text-black">{item.name}</p>
                           <p className="text-[10px] text-black/50">
-                            Size: {item.size || 'M'} • Qty: {item.quantity}
+                            {item.size && `Size: ${item.size} • `}Qty: {item.quantity}
                             {item.lining && ` • ${item.lining}`}
                             {item.zip && ` • ${item.zip}`}
                           </p>
@@ -2415,6 +2943,22 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
                   ))}
                 </div>
 
+                {(() => {
+                  const subtotal = (selectedOrder.items || []).reduce((sum: number, it: any) => sum + it.price * it.quantity, 0)
+                  const extra = selectedOrder.total - subtotal
+                  return extra !== 0 && subtotal > 0 ? (
+                    <div className="pt-2 border-t border-black/10 space-y-1 text-[11px] text-black/60">
+                      <div className="flex justify-between">
+                        <span>Items Subtotal</span>
+                        <span>₹{subtotal.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>{extra > 0 ? 'Shipping & Charges' : 'Discounts'}</span>
+                        <span>{extra > 0 ? '+' : '−'}₹{Math.abs(extra).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  ) : null
+                })()}
                 <div className="pt-2 border-t border-black/10 flex justify-between font-bold text-sm">
                   <span>Total Amount</span>
                   <span>₹{selectedOrder.total.toLocaleString()}</span>
@@ -2448,6 +2992,88 @@ function OrderManager({ onToast }: { onToast: (msg: string) => void }) {
 // =====================================================
 // 5. Store Settings & Subscription Plan
 // =====================================================
+function CustomDomainPanel({
+  slug,
+  current,
+  verified,
+  onSaved,
+  onToast,
+}: {
+  slug: string
+  current: string
+  verified: boolean
+  onSaved: () => void
+  onToast: (msg: string) => void
+}) {
+  const [domain, setDomain] = useState(current)
+  const [cname, setCname] = useState('cname.orvexacloud.in')
+  const [busy, setBusy] = useState(false)
+  const [hint, setHint] = useState<string | null>(null)
+
+  useEffect(() => {
+    setDomain(current)
+    fetchDomainConfig(slug).then((cfg) => {
+      if (cfg?.cnameTarget) setCname(cfg.cnameTarget)
+    }).catch(() => undefined)
+  }, [slug, current])
+
+  const save = async (value: string) => {
+    setBusy(true)
+    setHint(null)
+    try {
+      const res = await saveCustomDomain(slug, value)
+      if (res.cnameTarget) setCname(res.cnameTarget)
+      setHint(res.message)
+      onToast(res.message)
+      onSaved()
+    } catch (err) {
+      setHint(err instanceof Error ? err.message : 'Could not save the domain.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-6 pt-5 border-t border-black/8 space-y-3">
+      <h4 className="text-xs font-bold uppercase tracking-wider text-black/50">Your own website (DNS)</h4>
+      <p className="text-[11px] text-black/55 leading-relaxed">
+        Shoppers can keep using {storeAddress(slug)}. To serve the same storefront on your own domain, create a CNAME in your DNS (GoDaddy, Cloudflare, Namecheap) pointing at <code className="font-mono">{cname}</code>, then save the hostname here. Do not change nameservers unless you are moving the whole domain to Orvexa.
+      </p>
+      <form
+        className="flex flex-col sm:flex-row gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void save(domain.trim())
+        }}
+      >
+        <input
+          value={domain}
+          onChange={(e) => setDomain(e.target.value)}
+          placeholder="www.yourbrand.in"
+          className="flex-1 border border-black/15 rounded-lg px-3 py-2 text-xs font-mono"
+        />
+        <button type="submit" disabled={busy} className="bg-black text-white text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg disabled:opacity-50 cursor-pointer">
+          {busy ? 'Checking…' : 'Save & check DNS'}
+        </button>
+        {current && (
+          <button type="button" disabled={busy} onClick={() => void save('')} className="text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg border border-black/15 cursor-pointer">
+            Remove
+          </button>
+        )}
+      </form>
+      {current && (
+        <p className={`text-[11px] font-semibold ${verified ? 'text-emerald-700' : 'text-amber-700'}`}>
+          {verified ? `${current} is connected.` : `${current} is saved. DNS is not pointing at ${cname} yet.`}
+        </p>
+      )}
+      {hint && <p className="text-[11px] text-black/60">{hint}</p>}
+      <p className="text-[10px] font-mono text-black/40">
+        CNAME www{domain ? `.${domain.replace(/^www\./, '')}` : ''} → {cname}
+      </p>
+    </div>
+  )
+}
+
 function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardView) => void; onToast: (msg: string) => void }) {
   const { tenant, refreshTenant } = useTenant()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -2552,6 +3178,11 @@ function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardV
     setPassError(null)
     setPassSuccess(null)
 
+    if (!currentPassword.trim()) {
+      setPassError('Enter your current password to confirm this change.')
+      return
+    }
+
     if (newPassword.length < 6) {
       setPassError('New password must be at least 6 characters.')
       return
@@ -2565,7 +3196,7 @@ function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardV
     setIsChangingPassword(true)
 
     const res = await authService.changeSellerPassword(tenant.slug, {
-      currentPassword: currentPassword.trim() || undefined,
+      currentPassword: currentPassword.trim(),
       newPassword: newPassword.trim(),
       newEmail: ownerEmail.trim().toLowerCase(),
       ownerName: ownerName.trim(),
@@ -2714,8 +3345,8 @@ function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardV
     const text = `================================================
 🏢 STORE OWNER ACCESS PASS — ${tenant.brandName.toUpperCase()}
 ================================================
-Merchant Dashboard: ${window.location.origin}/?dashboard&tenant=${tenant.slug}
-Customer Storefront: ${window.location.origin}/?tenant=${tenant.slug}
+Merchant Dashboard: ${window.location.origin}/t/${tenant.slug}/dashboard
+Customer Storefront: ${window.location.origin}/t/${tenant.slug}
 
 🔑 CREDENTIALS:
 Login ID / Email: ${tenant.ownerEmail}
@@ -2945,11 +3576,11 @@ Isolated Database: orvexa_tenant_${tenant.slug}
             <form onSubmit={handleSaveProfile} className="space-y-5 max-w-xl">
               <div className="bg-stone-50 rounded-xl p-4 border border-black/8 flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] font-mono text-black/40 uppercase font-bold">Assigned Subdomain Username</p>
+                  <p className="text-[10px] font-mono text-black/40 uppercase font-bold">Store portal username</p>
                   <code className="text-xs font-mono font-bold text-indigo-700">{tenant.slug}</code>
                 </div>
                 <span className="text-[11px] bg-stone-200/80 px-2.5 py-1 rounded text-black/60 font-mono">
-                  {tenant.slug}.orvexatech.com
+                  {storeAddress(tenant.slug)}
                 </span>
               </div>
 
@@ -3355,10 +3986,16 @@ Isolated Database: orvexa_tenant_${tenant.slug}
             <p className="font-bold text-base">{tenant.brandName}</p>
           </div>
           <div>
-            <p className="text-black/40 text-xs mb-1">Assigned Subdomain</p>
-            <p className="font-mono font-bold text-xs bg-stone-100 p-2 rounded text-amber-900 border border-black/5">
-              {tenant.slug}.orvexatech.com
-            </p>
+            <p className="text-black/40 text-xs mb-1">Platform storefront</p>
+            <a href={tenantPortalPath(tenant.slug)} className="font-mono font-bold text-xs bg-stone-100 p-2 rounded text-amber-900 border border-black/5 block hover:underline">
+              {storeAddress(tenant.slug)}
+            </a>
+          </div>
+          <div>
+            <p className="text-black/40 text-xs mb-1">Seller portal</p>
+            <a href={tenantPortalPath(tenant.slug, 'dashboard')} className="font-mono font-bold text-xs bg-stone-100 p-2 rounded text-amber-900 border border-black/5 block hover:underline">
+              {storeAddress(tenant.slug)}/dashboard
+            </a>
           </div>
           <div>
             <p className="text-black/40 text-xs mb-1">Merchant Owner</p>
@@ -3368,23 +4005,19 @@ Isolated Database: orvexa_tenant_${tenant.slug}
             <p className="text-black/40 text-xs mb-1">Account Email</p>
             <p className="font-semibold">{tenant.ownerEmail}</p>
           </div>
-          {tenant.customDomain && (
-            <div className="sm:col-span-2">
-              <p className="text-black/40 text-xs mb-1">Custom Domain Connected</p>
-              <p className="font-mono text-emerald-700 font-bold bg-emerald-50 p-2 rounded border border-emerald-200">
-                https://{tenant.customDomain} (SSL Active)
-              </p>
-            </div>
-          )}
         </div>
+        <CustomDomainPanel slug={tenant.slug} current={tenant.customDomain || ''} verified={Boolean(tenant.customDomainVerified)} onSaved={() => refreshTenant()} onToast={onToast} />
       </div>
 
       <div className="bg-white rounded-xl p-6 border border-black/8 shadow-sm">
         <h3 className="text-sm font-bold tracking-wider uppercase text-black/50 mb-4">Subscription & Plan Tier</h3>
         <div className="flex items-center gap-4 mb-6">
           <div className="flex-1">
-            <p className="text-2xl font-bold">₹{tenant.subscription.pricePerMonth.toLocaleString()}/mo</p>
-            <p className="text-xs text-black/40 uppercase tracking-wider font-bold">{tenant.plan} Plan</p>
+            <p className="text-2xl font-bold">{formatPlanPrice(tenant.subscription.pricePerMonth)}</p>
+            <p className="text-xs text-black/40 uppercase tracking-wider font-bold">{PLAN_CATALOG[normalizePlanId(tenant.plan)].label} Plan</p>
+            {tenant.subscription.status === 'trial' && tenant.subscription.trialEndsAt && (
+              <p className="text-xs text-blue-700 mt-1">Free trial ends {tenant.subscription.trialEndsAt.slice(0, 10)}. Prices exclude 18% GST.</p>
+            )}
           </div>
           <span className={`text-xs font-bold uppercase tracking-wider px-3.5 py-1.5 rounded-full ${
             tenant.subscription.status === 'active' ? 'bg-emerald-50 text-emerald-700' :
@@ -3449,11 +4082,9 @@ function DatabaseManager({ onToast }: { onToast: (msg: string) => void }) {
     (tenant as any)?.customDbName || `orvexa_tenant_${tenant?.slug || 'lunar'}`
   )
   const [showPassword, setShowPassword] = useState(false)
-  const [isTesting, setIsTesting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [dbStatus, setDbStatus] = useState<'connected' | 'testing' | 'error'>('connected')
   const [statusMsg, setStatusMsg] = useState('Connected to dedicated isolated store database')
-  const [latencyMs, setLatencyMs] = useState<number>(14)
   const [activeTab, setActiveTab] = useState<'config' | 'collections' | 'env'>('config')
   const [copiedEnv, setCopiedEnv] = useState(false)
 
@@ -3480,30 +4111,22 @@ function DatabaseManager({ onToast }: { onToast: (msg: string) => void }) {
     }
   }
 
-  // Live Test Connection
+  // Checks the connection string's format; the server connects for real when it is saved.
   const handleTestConnection = async () => {
-    setIsTesting(true)
-    setDbStatus('testing')
-    setStatusMsg('Testing connection to MongoDB cluster...')
-
-    setTimeout(() => {
-      setIsTesting(false)
-      const mockLatency = Math.floor(Math.random() * 15) + 10
-      setLatencyMs(mockLatency)
+    const uri = customUri.trim()
+    if (!uri) {
       setDbStatus('connected')
-
-      if (customUri.trim()) {
-        setStatusMsg(
-          `Connection verified! MongoDB cluster responded in ${mockLatency}ms. SSL TLS 1.3 handshake verified.`
-        )
-        onToast(`Connection verified (${mockLatency}ms)! Ready to save.`)
-      } else {
-        setStatusMsg(
-          `Connected to Orvexa Tech isolated multi-database (${defaultDbName}) with ${mockLatency}ms ping.`
-        )
-        onToast('Platform default database verified.')
-      }
-    }, 900)
+      setStatusMsg(`Using the Orvexa platform database (${defaultDbName}).`)
+      return
+    }
+    if (!/^mongodb\+srv:\/\/[^\s/]+\/?[^\s]*$/.test(uri)) {
+      setDbStatus('error')
+      setStatusMsg('This is not a mongodb+srv:// connection string. Copy it from MongoDB Atlas: Connect, then Drivers.')
+      return
+    }
+    setDbStatus('connected')
+    setStatusMsg('The format looks right. The server connects to the database when you save, and refuses to switch if it cannot.')
+    onToast('Format looks right. Save to connect.')
   }
 
   // Save & Apply Database Configuration
@@ -3561,7 +4184,7 @@ function DatabaseManager({ onToast }: { onToast: (msg: string) => void }) {
 TENANT_ID=${tenant?.id}
 TENANT_SLUG=${tenant?.slug}
 BRAND_NAME="${tenant?.brandName}"
-SUBDOMAIN=${tenant?.slug}.orvexatech.com
+STORE_PORTAL=${storeAddress(tenant?.slug || '')}
 
 # --- Isolated Database Configuration ---
 MONGODB_DB_NAME=${customDbName || defaultDbName}
@@ -3622,9 +4245,7 @@ ENABLE_CUSTOMER_REVIEWS=true`
             <p className="text-[10px] font-bold uppercase tracking-wider text-black/40">Connection Status</p>
             <p className="font-bold text-xs text-emerald-700 mt-1 flex items-center gap-1.5">
               <span>● Operational</span>
-              <span className="text-[10px] text-black/40 font-mono">({latencyMs}ms)</span>
             </p>
-            <span className="text-[10px] text-black/50 mt-1 inline-block">SSL / TLS 1.3 Active</span>
           </div>
 
           <div className="bg-stone-50 border border-black/8 p-4 rounded-xl">
@@ -3784,23 +4405,16 @@ ENABLE_CUSTOMER_REVIEWS=true`
               <button
                 type="button"
                 onClick={handleTestConnection}
-                disabled={isTesting || isSaving}
+                disabled={isSaving}
                 className="bg-stone-100 hover:bg-stone-200 text-black font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-xl transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2 border border-black/10"
               >
-                {isTesting ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-                    <span>Testing Connection...</span>
-                  </>
-                ) : (
-                  <span>⚡ Test Connection</span>
-                )}
+                <span>Check Format</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleSaveDatabase}
-                disabled={isSaving || isTesting}
+                disabled={isSaving}
                 className="bg-black hover:bg-stone-800 text-white font-bold text-xs uppercase tracking-wider px-6 py-3 rounded-xl transition-all shadow-md cursor-pointer disabled:opacity-50 flex items-center gap-2"
               >
                 {isSaving ? (

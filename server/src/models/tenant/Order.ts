@@ -2,6 +2,7 @@
 import { Schema, type Connection, type Model, type Document } from 'mongoose'
 
 export interface IOrderItem {
+  productId?: number
   name: string
   price: number
   quantity: number
@@ -28,6 +29,10 @@ export interface IOrder extends Document {
   estimatedDelivery: string
   subtotal: number
   discount?: number
+  discountCode?: string
+  customerEmail?: string
+  /** True once a cancellation has put the items back into stock (prevents double restock). */
+  stockRestored?: boolean
   shipping: number
   total: number
   paymentMethod: string
@@ -57,9 +62,12 @@ export const OrderSchema = new Schema<IOrder>(
     awb: { type: String, default: '' },
     estimatedDelivery: { type: String, default: '' },
     subtotal: { type: Number, required: true },
-    discount: { type: Number, default: 0 },
-    shipping: { type: Number, default: 0 },
-    total: { type: Number, required: true },
+    discount: { type: Number, default: 0, min: 0 },
+    discountCode: { type: String, default: '' },
+    customerEmail: { type: String, default: '' },
+    stockRestored: { type: Boolean, default: false },
+    shipping: { type: Number, default: 0, min: 0 },
+    total: { type: Number, required: true, min: 0 },
     paymentMethod: { type: String, default: 'UPI' },
     shippingAddress: {
       name: { type: String, required: true },
@@ -71,9 +79,10 @@ export const OrderSchema = new Schema<IOrder>(
     },
     items: [
       {
+        productId: { type: Number },
         name: { type: String, required: true },
-        price: { type: Number, required: true },
-        quantity: { type: Number, required: true },
+        price: { type: Number, required: true, min: 0 },
+        quantity: { type: Number, required: true, min: 1 },
         size: { type: String, default: '' },
         lining: { type: String },
         zip: { type: String },
@@ -92,6 +101,8 @@ export const OrderSchema = new Schema<IOrder>(
   },
   { timestamps: true }
 )
+
+OrderSchema.index({ createdAt: -1 })
 
 export function getTenantOrderModel(conn: Connection): Model<IOrder> {
   return conn.models.Order || conn.model<IOrder>('Order', OrderSchema)

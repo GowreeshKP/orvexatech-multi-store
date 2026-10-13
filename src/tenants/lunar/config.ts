@@ -35,14 +35,14 @@ export const lunarTenantConfig: TenantConfig = {
   },
   subscription: {
     plan: 'pro',
-    pricePerMonth: 2499,
+    pricePerMonth: 3660,
     status: 'active',
     nextBillingDate: '2026-10-15',
     paymentMethod: 'razorpay',
     invoices: [
-      { id: 'INV-001', amount: 2499, status: 'paid', date: '2026-09-15', description: 'Pro Plan - September 2026' },
-      { id: 'INV-002', amount: 2499, status: 'paid', date: '2026-08-15', description: 'Pro Plan - August 2026' },
-      { id: 'INV-003', amount: 2499, status: 'paid', date: '2026-07-15', description: 'Pro Plan - July 2026' },
+      { id: 'INV-001', amount: 3660, status: 'paid', date: '2026-09-15', description: 'Growth Pro Plan - September 2026' },
+      { id: 'INV-002', amount: 3660, status: 'paid', date: '2026-08-15', description: 'Growth Pro Plan - August 2026' },
+      { id: 'INV-003', amount: 3660, status: 'paid', date: '2026-07-15', description: 'Growth Pro Plan - July 2026' },
     ],
   },
   databaseConfig: {

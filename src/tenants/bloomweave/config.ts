@@ -32,12 +32,12 @@ export const bloomweaveTenantConfig: TenantConfig = {
   },
   subscription: {
     plan: 'starter',
-    pricePerMonth: 999,
+    pricePerMonth: 1460,
     status: 'active',
     nextBillingDate: '2026-10-01',
     paymentMethod: 'razorpay',
     invoices: [
-      { id: 'INV-301', amount: 999, status: 'paid', date: '2026-09-01', description: 'Starter Plan - September 2026' },
+      { id: 'INV-301', amount: 1460, status: 'paid', date: '2026-09-01', description: 'Starter Plan - September 2026' },
     ],
   },
   databaseConfig: {

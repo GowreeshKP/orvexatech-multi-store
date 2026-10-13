@@ -22,7 +22,7 @@ export const ReviewSchema = new Schema<IReview>(
     date: { type: String, default: 'Recent' },
     title: { type: String, default: '' },
     comment: { type: String, required: true },
-    verified: { type: Boolean, default: true },
+    verified: { type: Boolean, default: false },
   },
   { timestamps: true }
 )
@@ -47,6 +47,8 @@ export interface IThemeConfigDoc extends Document {
   announcementMessages: string[]
   discountCode?: string
   discountPercent?: number
+  freeShippingThreshold?: number
+  shippingFee?: number
   enableAnimations: boolean
   enableReviews: boolean
   enableOrderTracking: boolean
@@ -67,8 +69,10 @@ export const ThemeConfigSchema = new Schema<IThemeConfigDoc>(
     secondaryCtaText: { type: String, default: 'ABOUT US' },
     logoUrl: { type: String, default: '' },
     announcementMessages: { type: [String], default: [] },
-    discountCode: { type: String, default: 'WELCOME10' },
-    discountPercent: { type: Number, default: 10 },
+    discountCode: { type: String, default: '' },
+    discountPercent: { type: Number, default: 0, min: 0, max: 90 },
+    freeShippingThreshold: { type: Number, default: 999, min: 0 },
+    shippingFee: { type: Number, default: 70, min: 0 },
     enableAnimations: { type: Boolean, default: true },
     enableReviews: { type: Boolean, default: true },
     enableOrderTracking: { type: Boolean, default: true },

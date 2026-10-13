@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 
 import siteConfiguration from './.figma/make/site.json' with { type: 'json' }
+import { scaffoldStoreFolder } from './scripts/create-store.mjs'
 
 // Vite config — https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -23,6 +24,7 @@ export default defineConfig(({ mode }) => {
       figmaErrorOverlayReplay(),
       figmaReactRefreshBoundaryFallback(),
       figmaMakeKitPlugin({ storiesGlob: '/src/**/*.stories.{ts,tsx,js,jsx}' }),
+      orvexaStoreScaffold(),
     ],
     resolve: {
       alias: {
@@ -48,6 +50,38 @@ export default defineConfig(({ mode }) => {
     },
   }
 })
+
+/**
+ * Dev-only endpoint the admin UI calls when it creates or approves a store, so the store's
+ * frontend folder (src/tenants/<slug>/) exists straight away. Production builds have no
+ * writable source tree; there, run `npm run store:create -- <slug>` and deploy.
+ */
+function orvexaStoreScaffold(): Plugin {
+  return {
+    name: 'orvexa-store-scaffold',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/__orvexa/stores', (req, res, next) => {
+        if (req.method !== 'POST') return next()
+        let body = ''
+        req.on('data', (chunk) => {
+          body += chunk
+          if (body.length > 10_000) req.destroy()
+        })
+        req.on('end', () => {
+          res.setHeader('Content-Type', 'application/json')
+          try {
+            const { slug, brandName } = JSON.parse(body || '{}')
+            res.end(JSON.stringify(scaffoldStoreFolder({ rootDir: server.config.root, slug, brandName })))
+          } catch (err) {
+            res.statusCode = 400
+            res.end(JSON.stringify({ error: (err as Error).message }))
+          }
+        })
+      })
+    },
+  }
+}
 
 type FigmaSiteConfiguration = {
   title?: string

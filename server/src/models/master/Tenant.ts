@@ -1,6 +1,16 @@
 // --- Master Database: Tenant Store Registry Model ---
 import { Schema, type Connection, type Model, type Document } from 'mongoose'
 
+// read_only: storefront still shows products but takes no new orders (e.g. after failed payment);
+// the owner and staff can still sign in to fix billing and fulfil existing orders.
+// cancelled: closed by the owner; the storefront and sign-in are off.
+export const TENANT_STATUSES = ['active', 'read_only', 'suspended', 'pending', 'cancelled'] as const
+export type TenantStatus = (typeof TENANT_STATUSES)[number]
+
+export function tenantAllowsSignIn(status: TenantStatus): boolean {
+  return status === 'active' || status === 'read_only'
+}
+
 export interface IStaffMember {
   id: string
   name: string
@@ -20,14 +30,21 @@ export interface ITenant extends Document {
   passwordHash?: string
   passwordResetPending?: boolean
   passwordResetRequestedAt?: string
+  /** Owner access tokens issued before this instant are rejected. */
+  passwordChangedAt?: Date
   logo?: string
   customDomain?: string
+  customDomainVerified?: boolean
+  customDomainVerifiedAt?: string
   customMongoUri?: string // Bring-Your-Own-Database URI
   customDbName?: string // Custom MongoDB Database Name
   staffMembers: IStaffMember[]
-  status: 'active' | 'suspended' | 'pending'
+  status: TenantStatus
   plan: 'starter' | 'growth' | 'pro' | 'enterprise'
   createdAt: string
+  storeType?: string
+  niche?: string
+  categories?: Array<{ id: string; name: string; slug: string; desc?: string; image?: string }>
   theme: {
     primaryColor: string
     accentColor: string
@@ -44,11 +61,17 @@ export interface ITenant extends Document {
     enableAnimations: boolean
     enableReviews: boolean
     enableOrderTracking: boolean
+    discountCode?: string
+    discountPercent?: number
+    freeShippingThreshold?: number
+    shippingFee?: number
   }
   subscription?: {
     plan: string
     pricePerMonth: number
     status: string
+    cycle?: 'monthly' | 'yearly'
+    trialEndsAt?: string
     nextBillingDate: string
     paymentMethod: string
     invoices: Array<{ id: string; amount: number; status: string; date: string; description: string }>
@@ -66,8 +89,11 @@ export const TenantSchema = new Schema<ITenant>(
     passwordHash: { type: String, default: '' },
     passwordResetPending: { type: Boolean, default: false },
     passwordResetRequestedAt: { type: String, default: '' },
+    passwordChangedAt: { type: Date },
     logo: { type: String, default: '' },
-    customDomain: { type: String, default: '' },
+    customDomain: { type: String, default: '', index: true },
+    customDomainVerified: { type: Boolean, default: false },
+    customDomainVerifiedAt: { type: String, default: '' },
     customMongoUri: { type: String, default: '' },
     customDbName: { type: String, default: '' },
     staffMembers: {
@@ -83,9 +109,23 @@ export const TenantSchema = new Schema<ITenant>(
       ],
       default: [],
     },
-    status: { type: String, enum: ['active', 'suspended', 'pending'], default: 'active' },
+    status: { type: String, enum: TENANT_STATUSES, default: 'active' },
     plan: { type: String, enum: ['starter', 'growth', 'pro', 'enterprise'], default: 'starter' },
     createdAt: { type: String, default: () => new Date().toISOString() },
+    storeType: { type: String, default: '' },
+    niche: { type: String, default: '' },
+    categories: {
+      type: [
+        {
+          id: { type: String, required: true },
+          name: { type: String, required: true },
+          slug: { type: String, required: true },
+          desc: { type: String, default: '' },
+          image: { type: String, default: '' },
+        },
+      ],
+      default: [],
+    },
     theme: {
       primaryColor: { type: String, default: '#8C5A4F' },
       accentColor: { type: String, default: '#D4A574' },
@@ -102,11 +142,17 @@ export const TenantSchema = new Schema<ITenant>(
       enableAnimations: { type: Boolean, default: true },
       enableReviews: { type: Boolean, default: true },
       enableOrderTracking: { type: Boolean, default: true },
+      discountCode: { type: String, default: '' },
+      discountPercent: { type: Number, default: 0, min: 0, max: 90 },
+      freeShippingThreshold: { type: Number, default: 999, min: 0 },
+      shippingFee: { type: Number, default: 70, min: 0 },
     },
     subscription: {
       plan: { type: String, default: 'starter' },
-      pricePerMonth: { type: Number, default: 999 },
+      pricePerMonth: { type: Number, default: 1460 },
       status: { type: String, default: 'active' },
+      cycle: { type: String, enum: ['monthly', 'yearly'], default: 'monthly' },
+      trialEndsAt: { type: String, default: '' },
       nextBillingDate: { type: String, default: '' },
       paymentMethod: { type: String, default: 'razorpay' },
       invoices: {
@@ -123,7 +169,23 @@ export const TenantSchema = new Schema<ITenant>(
       },
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      // Credentials and connection strings never leave the server, even in admin responses.
+      transform: (_doc, ret: Record<string, any>) => {
+        ret.hasPassword = Boolean(ret.passwordHash) && !String(ret.passwordHash).startsWith('$2a$12$REVOKED_')
+        delete ret.passwordHash
+        ret.hasCustomDatabase = Boolean(ret.customMongoUri)
+        delete ret.customMongoUri
+        if (Array.isArray(ret.staffMembers)) {
+          ret.staffMembers = ret.staffMembers.map(({ passwordHash: _p, ...s }: Record<string, unknown>) => s)
+        }
+        delete ret.__v
+        return ret
+      },
+    },
+  }
 )
 
 export function getTenantModel(conn: Connection): Model<ITenant> {

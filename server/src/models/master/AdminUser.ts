@@ -19,7 +19,16 @@ export const AdminUserSchema = new Schema<IAdminUser>(
     role: { type: String, enum: ['super_admin', 'admin', 'support'], default: 'super_admin' },
     lastLogin: { type: String },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      transform: (_doc, ret: Record<string, any>) => {
+        delete ret.passwordHash
+        delete ret.__v
+        return ret
+      },
+    },
+  }
 )
 
 export function getAdminUserModel(conn: Connection): Model<IAdminUser> {

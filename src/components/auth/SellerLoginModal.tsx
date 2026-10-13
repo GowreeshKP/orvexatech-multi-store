@@ -26,7 +26,7 @@ export default function SellerLoginModal({ isOpen, onClose, onSuccess }: Props) 
   const [forgotError, setForgotError] = useState<string | null>(null)
   const [forgotResetToken, setForgotResetToken] = useState<string | null>(null)
 
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+  const API_BASE = import.meta.env.VITE_API_URL || ''
 
   const handleLogin = useCallback(
     async (e: React.FormEvent) => {
@@ -54,7 +54,7 @@ export default function SellerLoginModal({ isOpen, onClose, onSuccess }: Props) 
         if (!res.ok) {
           setForgotError(data.error || 'Failed to send reset email.')
         } else {
-          setForgotResetToken(data.resetToken || null)
+          setForgotResetToken(null)
           setView('forgot-sent')
         }
       } catch {

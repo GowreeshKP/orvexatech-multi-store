@@ -1,159 +1,167 @@
-// --- Super Admin Hub Authentication Gateway ---
-// Login ID & Password interface for Super Admin control center
+import { useEffect, useState } from 'react'
+import { authService, type AdminSession } from '@/api/auth'
+import { auditLogger } from '@/api/audit-logger'
 
-import { useState } from 'react'
-import { authService, DEMO_ADMIN_CREDENTIAL, type AdminSession } from '@/api/auth'
+const MAX_ATTEMPTS = 5
+const LOCKOUT_MS = 60_000
+const LOCKOUT_KEY = 'orvexa_admin_login_lock'
 
-interface AdminLoginProps {
-  onLoginSuccess: (session: AdminSession) => void
+function readLock(): { failures: number; lockedUntil: number } {
+  try {
+    return JSON.parse(sessionStorage.getItem(LOCKOUT_KEY) || '') as { failures: number; lockedUntil: number }
+  } catch {
+    return { failures: 0, lockedUntil: 0 }
+  }
 }
 
-export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
-  const [loginId, setLoginId] = useState(DEMO_ADMIN_CREDENTIAL.loginId)
-  const [password, setPassword] = useState(DEMO_ADMIN_CREDENTIAL.password)
+function writeLock(lock: { failures: number; lockedUntil: number }) {
+  try {
+    sessionStorage.setItem(LOCKOUT_KEY, JSON.stringify(lock))
+  } catch {
+    // Storage unavailable — lockout only lasts for this render.
+  }
+}
+
+export default function AdminLogin({ onSuccess }: { onSuccess: (session: AdminSession) => void }) {
+  const [loginId, setLoginId] = useState('')
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [lock, setLock] = useState(readLock)
+  const [now, setNow] = useState(Date.now())
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const secondsLocked = Math.max(0, Math.ceil((lock.lockedUntil - now) / 1000))
+
+  const isLocked = secondsLocked > 0
+
+  useEffect(() => {
+    if (!isLocked) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => {
+      clearInterval(timer)
+      setError(null)
+    }
+  }, [isLocked])
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (secondsLocked > 0 || submitting) return
     setError(null)
+    setSubmitting(true)
 
-    if (!loginId.trim() || !password.trim()) {
-      setError('Please provide your Super Admin ID and Master Password.')
+    const res = await authService.loginAdmin(loginId, password)
+    setSubmitting(false)
+
+    if (res.success && res.session?.role === 'super_admin') {
+      const cleared = { failures: 0, lockedUntil: 0 }
+      writeLock(cleared)
+      setLock(cleared)
+      auditLogger.log({
+        actorId: res.session.userId,
+        actorName: res.session.name,
+        actorRole: 'super_admin',
+        action: 'ADMIN_LOGIN_SUCCESS',
+        category: 'auth',
+        severity: 'info',
+        details: `Super Admin signed in to the admin portal.`,
+      })
+      onSuccess(res.session)
       return
     }
 
-    setLoading(true)
-    const res = await authService.loginAdmin(loginId, password)
-    setLoading(false)
-    if (res.success && res.session) {
-      onLoginSuccess(res.session)
-    } else {
-      setError(res.error || 'Authentication failed. Invalid master credentials.')
-    }
-  }
-
-  const handleFillDemo = () => {
-    setLoginId(DEMO_ADMIN_CREDENTIAL.loginId)
-    setPassword(DEMO_ADMIN_CREDENTIAL.password)
-    setError(null)
+    const failures = lock.failures + 1
+    const next = failures >= MAX_ATTEMPTS ? { failures: 0, lockedUntil: Date.now() + LOCKOUT_MS } : { failures, lockedUntil: 0 }
+    writeLock(next)
+    setLock(next)
+    setNow(Date.now())
+    setPassword('')
+    auditLogger.log({
+      actorId: 'unknown',
+      actorName: loginId.trim() || 'unknown',
+      actorRole: 'super_admin',
+      action: 'ADMIN_LOGIN_FAILED',
+      category: 'security',
+      severity: 'security',
+      details: `Failed admin portal sign-in attempt for "${loginId.trim()}".`,
+    })
+    setError(
+      next.lockedUntil
+        ? 'Too many failed attempts. Sign-in is locked for 60 seconds.'
+        : `Invalid admin credentials. ${MAX_ATTEMPTS - failures} attempt${MAX_ATTEMPTS - failures === 1 ? '' : 's'} left.`,
+    )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-violet-50/40 to-slate-100 flex flex-col justify-center items-center p-4 sm:p-6 relative overflow-hidden font-sans text-slate-900">
-      {/* Ambient background subtle glow */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[34rem] h-[34rem] bg-violet-400/15 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-10 right-10 w-80 h-80 bg-indigo-400/10 rounded-full blur-3xl pointer-events-none" />
-
-      {/* Main Card */}
-      <div className="w-full max-w-md bg-white/95 border border-slate-200/90 rounded-3xl shadow-xl shadow-slate-200/60 p-6 sm:p-8 backdrop-blur-2xl relative z-10 animate-fade-in">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-violet-600 to-indigo-600 border border-violet-200 mb-3 shadow-lg shadow-violet-500/25 text-white">
-            <span className="text-2xl">👑</span>
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-sans antialiased">
+      <div className="w-full max-w-sm">
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-12 h-12 rounded-xl bg-slate-900 ring-1 ring-white/10 flex items-center justify-center text-lg font-black shadow-lg">
+            <span className="bg-gradient-to-tr from-amber-400 to-indigo-400 bg-clip-text text-transparent">O</span>
           </div>
-          <p className="text-[10px] font-mono tracking-[0.22em] text-violet-700 uppercase font-bold">
-            ORVEXA TECH PLATFORM MASTER GATEWAY
-          </p>
-          <h1 className="text-2xl font-bold text-slate-900 mt-1.5" style={{ fontFamily: 'var(--font-display)' }}>
-            Super Admin Console
-          </h1>
-          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-            Sign in to manage multi-tenant merchant stores, subscription billing, and domain routing.
-          </p>
+          <h1 className="mt-4 text-xl font-semibold text-white tracking-tight">Orvexa Admin Portal</h1>
+          <p className="mt-1 text-xs text-slate-400">Restricted access — authorized administrator only</p>
         </div>
 
-        {/* Error Alert */}
-        {error && (
-          <div className="mb-5 p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2 animate-shake">
-            <span>⚠️</span>
-            <span>{error}</span>
-          </div>
-        )}
-
-        {/* Form */}
-        <form onSubmit={handleLogin} className="space-y-4">
+        <form onSubmit={handleSubmit} className="bg-slate-900/80 border border-white/10 rounded-2xl p-6 space-y-4 shadow-2xl">
           <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1.5">
-              Admin Login ID
+            <label htmlFor="admin-login-id" className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+              Admin Email
+            </label>
+            <input
+              id="admin-login-id"
+              type="text"
+              autoComplete="username"
+              required
+              autoFocus
+              value={loginId}
+              onChange={(e) => setLoginId(e.target.value)}
+              className="w-full bg-slate-950 border border-white/10 rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-slate-600 outline-none focus:border-indigo-500"
+              placeholder="you@company.com"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="admin-password" className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+              Password
             </label>
             <div className="relative">
               <input
-                type="text"
-                value={loginId}
-                onChange={(e) => setLoginId(e.target.value)}
-                placeholder="admin@platform.com"
-                className="w-full bg-slate-50/80 border border-slate-300 focus:bg-white focus:border-violet-600 focus:ring-4 focus:ring-violet-500/10 rounded-xl px-4 py-3 text-xs text-slate-900 placeholder-slate-400 outline-none transition-all font-mono shadow-xs"
+                id="admin-password"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
                 required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-slate-950 border border-white/10 rounded-lg px-3.5 py-2.5 pr-16 text-sm text-white placeholder-slate-600 outline-none focus:border-indigo-500"
+                placeholder="••••••••"
               />
-              <span className="absolute right-3.5 top-3.5 text-slate-400 text-xs">🛡️</span>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-700">
-                Master Password
-              </label>
               <button
                 type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="text-[10px] text-violet-600 hover:text-violet-800 transition-colors uppercase tracking-wider font-bold cursor-pointer"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-slate-400 hover:text-white px-2 py-1 cursor-pointer"
               >
                 {showPassword ? 'Hide' : 'Show'}
               </button>
             </div>
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter admin password"
-                className="w-full bg-slate-50/80 border border-slate-300 focus:bg-white focus:border-violet-600 focus:ring-4 focus:ring-violet-500/10 rounded-xl px-4 py-3 text-xs text-slate-900 placeholder-slate-400 outline-none transition-all font-mono shadow-xs"
-                required
-              />
-              <span className="absolute right-3.5 top-3.5 text-slate-400 text-xs">🔑</span>
-            </div>
           </div>
+
+          {(error || secondsLocked > 0) && (
+            <p role="alert" className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+              {secondsLocked > 0 ? `Too many failed attempts. Try again in ${secondsLocked}s.` : error}
+            </p>
+          )}
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full mt-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-bold text-xs uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-lg shadow-violet-600/25 active:scale-[0.99] cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+            disabled={submitting || secondsLocked > 0}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg py-2.5 transition-colors cursor-pointer"
           >
-            {loading ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                <span>Authorizing Master Key...</span>
-              </>
-            ) : (
-              <span>Unlock Super Admin Console →</span>
-            )}
+            {submitting ? 'Verifying…' : 'Sign In'}
           </button>
         </form>
 
-        {/* Quick Demo Helper */}
-        <div className="mt-7 pt-5 border-t border-slate-100 flex items-center justify-between text-xs">
-          <button
-            type="button"
-            onClick={handleFillDemo}
-            className="text-[11px] text-violet-600 hover:text-violet-800 font-semibold transition-colors underline cursor-pointer"
-          >
-            Auto-fill Demo Admin Credentials
-          </button>
-          <span className="text-[10px] font-mono text-slate-400">v2.4 Enterprise</span>
-        </div>
-
-        {/* Storefront Link */}
-        <div className="mt-5 text-center">
-          <a
-            href="/?tenant=lunar"
-            className="text-xs text-slate-500 hover:text-slate-800 transition-colors inline-flex items-center gap-1.5 font-medium"
-          >
-            <span>🏬 View Tenant Storefront (The Lunar Clothing) →</span>
-          </a>
-        </div>
+        <p className="mt-6 text-center text-[11px] text-slate-600">© {new Date().getFullYear()} Orvexa Tech Private Limited</p>
       </div>
     </div>
   )

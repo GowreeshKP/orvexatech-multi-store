@@ -3,7 +3,7 @@
 export interface Product {
   id: number
   name: string
-  category: 'maxis' | 'dresses' | 'kalamkari' | 'handloom' | 'all'
+  category: string
   sculptLevel: string
   fabricTech: string
   fabricDesc: string
@@ -74,6 +74,7 @@ export interface TrackedOrder {
   shipping: number
   total: number
   paymentMethod: string
+  customerEmail?: string
   shippingAddress: {
     name: string
     phone: string

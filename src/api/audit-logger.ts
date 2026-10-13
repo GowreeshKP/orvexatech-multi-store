@@ -63,7 +63,7 @@ const INITIAL_AUDIT_LOGS: AuditLogEntry[] = [
     details: 'Store Owner authenticated into merchant dashboard from Chrome on Windows.',
     ipAddress: '106.51.24.118',
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    metadata: { sessionType: 'password', subdomain: 'lunar.orvexatech.com' },
+    metadata: { sessionType: 'password', subdomain: 'lunar.orvexacloud.in' },
   },
   {
     id: 'log_002',

@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react'
 import { authService, type StoreCredentialInfo } from '@/api/auth'
 import type { TenantConfig } from '@/types/tenant'
+import { storeAddress } from '@/data/plans'
 
 interface Props {
   tenant: TenantConfig | null
@@ -49,13 +50,8 @@ export default function StoreCredentialsModal({ tenant, isOpen, onClose, onSucce
       setOwnerPhone(tenant.ownerPhone || '')
       setStaffMsg(null)
 
-      if (current.passwordResetPending || current.isPasswordRevoked) {
-        const token = current.resetToken || 'active-reset-token'
-        setResetDetails({
-          token,
-          url: current.resetUrl || `${window.location.origin}/?reset_token=${token}&slug=${tenant.slug}`,
-          email: current.loginId,
-        })
+      if ((current.passwordResetPending || current.isPasswordRevoked) && current.resetToken && current.resetUrl) {
+        setResetDetails({ token: current.resetToken, url: current.resetUrl, email: current.loginId })
       } else {
         setResetDetails(null)
         setResetSuccess(null)
@@ -102,6 +98,10 @@ export default function StoreCredentialsModal({ tenant, isOpen, onClose, onSucce
         const updated = authService.getStoreCredential(tenant.slug)
         setCredInfo(updated)
         onSuccess?.(`Password reset email dispatched to ${res.ownerEmail}! Old password has been revoked.`)
+      } else {
+        setResetSuccess(null)
+        setResetDetails(null)
+        setStaffMsg(res.error || res.message)
       }
     } catch (err: any) {
       console.error('Password reset trigger error:', err)
@@ -201,18 +201,18 @@ export default function StoreCredentialsModal({ tenant, isOpen, onClose, onSucce
 🏢 STORE OWNER ACCESS PASS — ORVEXA CLOUD
 ================================================
 Store Name: ${tenant.brandName}
-Subdomain: ${tenant.slug}.orvexatech.com
-Storefront URL: ${window.location.origin}/?tenant=${tenant.slug}
+Store portal: ${storeAddress(tenant.slug)}
+Storefront URL: ${window.location.origin}/t/${tenant.slug}
 
 🔑 MERCHANT PORTAL LOGIN DETAILS:
-Dashboard URL: ${window.location.origin}/?dashboard&tenant=${tenant.slug}
+Dashboard URL: ${window.location.origin}/t/${tenant.slug}/dashboard
 Login ID / Email: ${ownerEmail || tenant.ownerEmail}
 Login Username: ${tenant.slug}
 Password Status: ${passwordStatusDescription}
 ${resetDetails ? `Direct Password Reset Link: ${resetDetails.url}\n` : ''}Owner Contact: ${ownerName || tenant.ownerName} (${ownerPhone || 'N/A'})
 
 🗄️ Isolated Database: orvexa_tenant_${tenant.slug}
-Security Level: Dedicated Database Isolation (AES-256)
+Security Level: Dedicated Database Isolation
 ================================================`
 
   const handleCopyAccessPass = () => {
@@ -247,7 +247,7 @@ Security Level: Dedicated Database Isolation (AES-256)
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold text-slate-900 tracking-tight">{tenant.brandName}</h2>
                 <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200/70 font-medium">
-                  {tenant.slug}.orvexatech.com
+                  {storeAddress(tenant.slug)}
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
@@ -610,24 +610,24 @@ Security Level: Dedicated Database Isolation (AES-256)
                   <div>
                     <span className="text-slate-400 block text-[10px] uppercase font-bold">MERCHANT LOGIN URL</span>
                     <a
-                      href={`/?dashboard&tenant=${tenant.slug}`}
+                      href={`/t/${tenant.slug}/dashboard`}
                       target="_blank"
                       rel="noreferrer"
                       className="text-blue-600 hover:underline font-semibold break-all"
                     >
-                      /?dashboard&tenant={tenant.slug}
+                      /t/{tenant.slug}/dashboard
                     </a>
                   </div>
 
                   <div>
                     <span className="text-slate-400 block text-[10px] uppercase font-bold">LIVE STOREFRONT</span>
                     <a
-                      href={`/?tenant=${tenant.slug}`}
+                      href={`/t/${tenant.slug}`}
                       target="_blank"
                       rel="noreferrer"
                       className="text-blue-600 hover:underline font-semibold break-all"
                     >
-                      /?tenant={tenant.slug}
+                      /t/{tenant.slug}
                     </a>
                   </div>
 

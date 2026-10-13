@@ -4,6 +4,7 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { authService } from '@/api/auth'
+import { storeAddress } from '@/data/plans'
 
 interface Props {
   isOpen: boolean
@@ -265,7 +266,7 @@ export default function ResetPasswordModal({ isOpen, onClose, resetToken: propTo
                     <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white">
                       <span>🏬</span>
                       <span className="font-semibold text-white">{effectiveSlug}</span>
-                      <span className="text-white/40 font-mono text-[11px]">({effectiveSlug}.orvexatech.com)</span>
+                      <span className="text-white/40 font-mono text-[11px]">({storeAddress(effectiveSlug)})</span>
                     </div>
                   ) : (
                     <select

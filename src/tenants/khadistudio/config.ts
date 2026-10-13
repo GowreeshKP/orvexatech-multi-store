@@ -33,12 +33,12 @@ export const khadistudioTenantConfig: TenantConfig = {
   },
   subscription: {
     plan: 'starter',
-    pricePerMonth: 999,
+    pricePerMonth: 1460,
     status: 'active',
     nextBillingDate: '2026-10-20',
     paymentMethod: 'razorpay',
     invoices: [
-      { id: 'INV-201', amount: 999, status: 'paid', date: '2026-08-20', description: 'Starter Plan - August 2026' },
+      { id: 'INV-201', amount: 1460, status: 'paid', date: '2026-08-20', description: 'Starter Plan - August 2026' },
     ],
   },
   databaseConfig: {

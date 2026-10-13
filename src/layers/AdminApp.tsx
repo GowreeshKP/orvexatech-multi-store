@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react'
 import { useAdminTenants, useAdminApplications, usePlatformStats } from '@/api/hooks'
 import { authService, type AdminSession } from '@/api/auth'
 import { auditLogger } from '@/api/audit-logger'
-import CommonLoginModal from '@/components/auth/CommonLoginModal'
+import AdminLogin from '@/components/auth/AdminLogin'
 import ResetPasswordModal from '@/components/auth/ResetPasswordModal'
-import PlatformWebsite from '@/components/platform/PlatformWebsite'
 import StoreCredentialsModal from '@/components/auth/StoreCredentialsModal'
 import ProvisionStoreModal from '@/components/platform/ProvisionStoreModal'
 import PlatformAuditLogs from '@/components/platform/PlatformAuditLogs'
 import type { TenantConfig } from '@/types/tenant'
+import { PLAN_CATALOG, PLAN_IDS, formatPlanPrice, normalizePlanId, storeAddress } from '@/data/plans'
 
 const ADMIN_NAV = [
   { id: 'dashboard', label: 'Platform Overview', icon: 'overview' },
@@ -115,8 +115,6 @@ function Sparkline({ data, color = '#6366f1' }: { data: number[]; color?: string
 export default function AdminApp() {
   const [session, setSession] = useState<AdminSession | null>(() => authService.getAdminSession())
   const [activeView, setActiveView] = useState<AdminView>('dashboard')
-  const [displayMode, setDisplayMode] = useState<'website' | 'console'>('website')
-  const [showLoginModal, setShowLoginModal] = useState(false)
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false)
   const [adminToast, setAdminToast] = useState<string | null>(null)
   const { provisionTenant, refresh: refreshTenants } = useAdminTenants()
@@ -137,73 +135,35 @@ export default function AdminApp() {
     }
   }, [])
 
+  useEffect(() => {
+    document.title = session ? 'Orvexa Admin Portal' : 'Sign In | Orvexa Admin Portal'
+  }, [session])
+
   const handleLogout = () => {
     authService.logoutAdmin()
     setSession(null)
-    setDisplayMode('website')
+    setActiveView('dashboard')
   }
 
-  const handleLoginSuccess = (newSession?: any) => {
-    if (newSession?.role === 'super_admin') {
-      setSession(newSession)
-      setShowLoginModal(false)
-      setDisplayMode('console')
-    } else if (newSession?.tenantSlug) {
-      setShowLoginModal(false)
-      window.location.href = `/?panel=dashboard&tenant=${newSession.tenantSlug}`
-    } else {
-      setShowLoginModal(false)
-    }
-  }
+  const resetPasswordModal = (
+    <ResetPasswordModal
+      isOpen={isResetOpen}
+      resetToken={resetToken || undefined}
+      tenantSlug={resetSlug || undefined}
+      onClose={() => {
+        setIsResetOpen(false)
+        setResetToken(null)
+        setResetSlug(null)
+      }}
+    />
+  )
 
-  // If in public website mode, render the high-impact client acquisition platform website
-  if (displayMode === 'website') {
+  if (!session || session.role !== 'super_admin') {
     return (
-      <div className="relative min-h-screen">
-        <PlatformWebsite
-          onOpenAdminLogin={() => setShowLoginModal(true)}
-          onOpenAdminConsole={() => setDisplayMode('console')}
-          isSuperAdminLoggedIn={!!session}
-        />
-
-        {/* Unified Common Login Modal */}
-        <CommonLoginModal
-          isOpen={showLoginModal}
-          onClose={() => setShowLoginModal(false)}
-          onSuccess={handleLoginSuccess}
-        />
-
-        {/* Password Reset Modal */}
-        <ResetPasswordModal
-          isOpen={isResetOpen}
-          resetToken={resetToken || undefined}
-          tenantSlug={resetSlug || undefined}
-          onClose={() => {
-            setIsResetOpen(false)
-            setResetToken(null)
-            setResetSlug(null)
-          }}
-        />
-      </div>
-    )
-  }
-
-  // If in console mode but session expired, require login
-  if (!session) {
-    return (
-      <div className="relative min-h-screen bg-slate-950 flex items-center justify-center p-4">
-        <CommonLoginModal
-          isOpen={true}
-          onClose={() => setDisplayMode('website')}
-          onSuccess={handleLoginSuccess}
-        />
-        <button
-          onClick={() => setDisplayMode('website')}
-          className="fixed top-5 left-5 z-50 text-xs font-semibold px-3.5 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800 border border-slate-700 shadow-lg flex items-center gap-2 cursor-pointer"
-        >
-          <span>← Back to Public Website</span>
-        </button>
-      </div>
+      <>
+        <AdminLogin onSuccess={setSession} />
+        {resetPasswordModal}
+      </>
     )
   }
 
@@ -255,14 +215,6 @@ export default function AdminApp() {
 
         {/* Live Cluster Info Card */}
         <div className="mt-auto p-3">
-          <button
-            onClick={() => setDisplayMode('website')}
-            className="w-full mb-3 p-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-          >
-            <span>🌐</span>
-            <span>View Client Website</span>
-          </button>
-
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 mb-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Cluster Status</span>
@@ -274,7 +226,7 @@ export default function AdminApp() {
             <div className="text-[11px] font-mono text-slate-600 space-y-1">
               <div className="flex justify-between">
                 <span>Region:</span>
-                <span className="font-semibold text-slate-800">ap-south-1 (Mumbai)</span>
+                <span className="font-semibold text-slate-800">Set by hosting</span>
               </div>
               <div className="flex justify-between">
                 <span>Master DB:</span>
@@ -320,16 +272,8 @@ export default function AdminApp() {
           </div>
 
           <div className="flex items-center gap-2.5">
-            <button
-              onClick={() => setDisplayMode('website')}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white shadow-xs cursor-pointer"
-            >
-              <span>🌐</span>
-              <span>Client-Facing Website</span>
-            </button>
-
             <a
-              href="/?tenant=lunar"
+              href="/t/lunar"
               target="_blank"
               className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer"
             >
@@ -630,7 +574,7 @@ function PlatformOverview({
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-slate-900 truncate">{t.brandName}</p>
                     <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
-                      <span>{t.slug}.orvexatech.com</span>
+                      <span>{storeAddress(t.slug)}</span>
                       <span>•</span>
                       <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
                         db: orvexa_tenant_{t.slug}
@@ -640,9 +584,9 @@ function PlatformOverview({
                 </div>
 
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-xs font-semibold text-slate-700">₹{t.subscription.pricePerMonth}/mo</span>
+                  <span className="text-xs font-semibold text-slate-700">{formatPlanPrice(t.subscription.pricePerMonth)}</span>
                   <a
-                    href={`/?tenant=${t.slug}`}
+                    href={`/t/${t.slug}`}
                     target="_blank"
                     className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 transition-colors"
                   >
@@ -711,11 +655,33 @@ function PlatformOverview({
 function ApplicationQueue() {
   const { applications, approve, reject } = useAdminApplications()
   const [provisionMessage, setProvisionMessage] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [slugEdits, setSlugEdits] = useState<Record<string, string>>({})
+  const [tab, setTab] = useState<'live' | 'waitlist'>('live')
   const pending = applications.filter((a) => a.status === 'pending')
-  const processed = applications.filter((a) => a.status !== 'pending')
+  const waitlist = applications.filter((a) => a.status === 'waitlist')
+  const processed = applications.filter((a) => a.status === 'approved' || a.status === 'rejected')
 
-  const handleApproveWithFeedback = (id: string, slug: string, brandName: string) => {
-    approve(id)
+  const handleReject = async (id: string) => {
+    setBusyId(id)
+    setErrorMessage(null)
+    const { error } = await reject(id)
+    setBusyId(null)
+    if (error) setErrorMessage(error)
+  }
+
+  const handleApproveWithFeedback = async (id: string, requestedSlug: string, brandName: string) => {
+    const override = slugEdits[id]?.trim().toLowerCase()
+    const slug = override || requestedSlug
+    setBusyId(id)
+    setErrorMessage(null)
+    const { tenant, error } = await approve(id, override && override !== requestedSlug ? override : undefined)
+    setBusyId(null)
+    if (!tenant) {
+      setErrorMessage(error || `Could not provision ${brandName}.`)
+      return
+    }
     auditLogger.log({
       tenantSlug: slug,
       tenantName: brandName,
@@ -740,7 +706,59 @@ function ApplicationQueue() {
           <span>{provisionMessage}</span>
         </div>
       )}
+      {errorMessage && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 px-5 py-3.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-3 shadow-xs">
+          <span>{errorMessage}</span>
+          <button onClick={() => setErrorMessage(null)} className="text-rose-500 hover:text-rose-700 cursor-pointer">✕</button>
+        </div>
+      )}
 
+      <div className="flex gap-2 text-xs">
+        <button
+          onClick={() => setTab('live')}
+          className={`px-3 py-1.5 rounded-lg font-medium cursor-pointer transition-colors ${tab === 'live' ? 'bg-slate-900 text-white font-bold' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+        >
+          Store Applications ({pending.length})
+        </button>
+        <button
+          onClick={() => setTab('waitlist')}
+          className={`px-3 py-1.5 rounded-lg font-medium cursor-pointer transition-colors ${tab === 'waitlist' ? 'bg-slate-900 text-white font-bold' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+        >
+          Early-Access Waitlist ({waitlist.length})
+        </button>
+      </div>
+
+      {tab === 'waitlist' ? (
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-100">
+            <h3 className="text-sm font-bold text-slate-900">Early-Access Waitlist</h3>
+            <p className="text-xs text-slate-400">Signups from countries that have not launched yet. These are interest only: no store is created and nobody is charged.</p>
+          </div>
+          {waitlist.length === 0 ? (
+            <p className="p-8 text-center text-xs text-slate-400">No early-access signups yet.</p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {waitlist.map((app) => (
+                <div key={app.id} className="p-4 flex items-center justify-between gap-4 text-xs flex-wrap">
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-900">{app.brandName}</p>
+                    <p className="font-mono text-slate-400">{app.ownerEmail}</p>
+                  </div>
+                  <div className="flex items-center gap-3 text-slate-500">
+                    <span className="font-mono font-bold text-slate-700">{app.launch?.country || app.attribution?.country || '—'}</span>
+                    {app.requestedPlan?.id && <span>{PLAN_CATALOG[normalizePlanId(app.requestedPlan.id)].label}</span>}
+                    <span className={app.consents?.marketing ? 'text-emerald-600' : 'text-slate-400'}>
+                      {app.consents?.marketing ? 'Marketing opt-in' : 'No marketing consent'}
+                    </span>
+                    <span className="font-mono">{app.submittedAt}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+      <>
       {/* Pending Applications Section */}
       <div>
         <div className="flex items-center justify-between mb-4">
@@ -769,15 +787,20 @@ function ApplicationQueue() {
                       <h4 className="text-base font-bold text-slate-900">{app.brandName}</h4>
                       <p className="text-xs text-slate-400 font-medium">{app.niche}</p>
                     </div>
-                    <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                      Pending Review
-                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        Pending Review
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {app.channel === 'website' ? `via ${app.attribution?.site || 'website'}` : 'via admin form'}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between py-1 border-b border-slate-100">
                       <span className="text-slate-400">Applicant / Owner:</span>
-                      <span className="font-semibold text-slate-800">{app.ownerName}</span>
+                      <span className="font-semibold text-slate-800">{app.ownerName || '—'}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-100">
                       <span className="text-slate-400">Contact Email:</span>
@@ -785,19 +808,87 @@ function ApplicationQueue() {
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-100">
                       <span className="text-slate-400">Target Subdomain:</span>
-                      <code className="text-indigo-600 font-mono font-semibold">{app.requestedSlug}.orvexatech.com</code>
+                      <code className="text-indigo-600 font-mono font-semibold">{storeAddress(slugEdits[app.id] || app.requestedSlug)}</code>
                     </div>
+                    {app.requestedPlan?.id && (
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-400">Chosen Plan:</span>
+                        <span className="font-semibold text-slate-800">
+                          {PLAN_CATALOG[normalizePlanId(app.requestedPlan.id)].label}
+                          {app.requestedPlan.cycle && <span className="text-slate-400 font-normal"> · {app.requestedPlan.cycle}</span>}
+                          {app.requestedPlan.total != null && (
+                            <span className="text-slate-400 font-normal"> · quoted {app.requestedPlan.currency || 'INR'} {app.requestedPlan.total.toLocaleString('en-IN')}</span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {app.launch?.country && (
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-400">Country:</span>
+                        <span className="font-mono font-semibold text-slate-700">{app.launch.country}</span>
+                      </div>
+                    )}
+                    {app.migration?.from && (
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-400">Migration:</span>
+                        <span className="font-semibold text-amber-700">
+                          From {app.migration.from}{app.migration.currentDomain ? ` (${app.migration.currentDomain})` : ''}
+                        </span>
+                      </div>
+                    )}
+                    {app.slugCheck && !app.slugCheck.available && (
+                      <div className="py-2 px-3 rounded-lg bg-amber-50 border border-amber-200 space-y-1.5">
+                        <p className="text-amber-800 font-semibold">
+                          "{app.requestedSlug}" is {app.slugCheck.reason === 'reserved' ? 'a reserved name' : app.slugCheck.reason === 'invalid' ? 'not a valid address' : 'already taken'}. Pick another address before approving.
+                        </p>
+                        <input
+                          value={slugEdits[app.id] ?? ''}
+                          onChange={(e) => setSlugEdits((s) => ({ ...s, [app.id]: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') }))}
+                          placeholder={`${app.requestedSlug}-store`}
+                          className="w-full px-2.5 py-1.5 rounded border border-amber-300 bg-white font-mono text-xs focus:outline-none focus:ring-2 focus:ring-amber-300"
+                        />
+                      </div>
+                    )}
+                    {app.consents?.termsAcceptedAt && (
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-400">Consent:</span>
+                        <span className="text-slate-600 text-right">
+                          Terms {app.consents.termsVersion?.terms ? `v${app.consents.termsVersion.terms} ` : ''}accepted {app.consents.termsAcceptedAt.slice(0, 10)}
+                          {' · '}{app.consents.marketing ? 'marketing opt-in' : 'no marketing'}
+                        </span>
+                      </div>
+                    )}
+                    {app.attribution?.utm && Object.keys(app.attribution.utm).length > 0 && (
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-400">Campaign:</span>
+                        <span className="font-mono text-[11px] text-slate-500 truncate max-w-[60%]">
+                          {Object.entries(app.attribution.utm).map(([k, v]) => `${k}=${v}`).join(' ')}
+                        </span>
+                      </div>
+                    )}
+                    {app.categories && app.categories.length > 0 && (
+                      <div className="py-1 border-b border-slate-100">
+                        <span className="text-slate-400 block mb-1">Store Categories:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {app.categories.map((c) => (
+                            <span key={c} className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-semibold text-[10px]">
+                              {c}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Provisioning preview box */}
                   <div className="bg-slate-50 rounded-lg p-3 border border-slate-200/80 space-y-1.5 text-[11px] font-mono">
                     <div className="flex items-center justify-between text-slate-600">
                       <span>📁 Client Folder:</span>
-                      <code className="text-slate-900 font-bold">src/tenants/{app.requestedSlug}/</code>
+                      <code className="text-slate-900 font-bold">src/tenants/{slugEdits[app.id] || app.requestedSlug}/</code>
                     </div>
                     <div className="flex items-center justify-between text-slate-600">
                       <span>🗄️ Isolated DB:</span>
-                      <code className="text-emerald-700 font-bold">orvexa_tenant_{app.requestedSlug}</code>
+                      <code className="text-emerald-700 font-bold">orvexa_tenant_{slugEdits[app.id] || app.requestedSlug}</code>
                     </div>
                   </div>
 
@@ -811,13 +902,15 @@ function ApplicationQueue() {
                 <div className="flex gap-2.5 pt-5 mt-4 border-t border-slate-100">
                   <button
                     onClick={() => handleApproveWithFeedback(app.id, app.requestedSlug, app.brandName)}
-                    className="flex-1 bg-slate-950 hover:bg-slate-800 text-white text-xs font-bold py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm"
+                    disabled={busyId === app.id || (app.slugCheck?.available === false && !slugEdits[app.id])}
+                    className="flex-1 bg-slate-950 hover:bg-slate-800 text-white text-xs font-bold py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    Authorize & Provision
+                    {busyId === app.id ? 'Working…' : 'Authorize & Provision'}
                   </button>
                   <button
-                    onClick={() => reject(app.id)}
-                    className="px-4 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer border border-rose-200"
+                    onClick={() => handleReject(app.id)}
+                    disabled={busyId === app.id}
+                    className="px-4 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer border border-rose-200 disabled:opacity-40"
                   >
                     Reject
                   </button>
@@ -842,13 +935,15 @@ function ApplicationQueue() {
                     {app.status}
                   </span>
                   <span className="font-bold text-slate-900">{app.brandName}</span>
-                  <span className="font-mono text-slate-400 hidden sm:inline">{app.requestedSlug}.orvexatech.com</span>
+                  <span className="font-mono text-slate-400 hidden sm:inline">{storeAddress(app.requestedSlug)}</span>
                 </div>
                 <span className="font-mono text-slate-500">{app.ownerEmail}</span>
               </div>
             ))}
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   )
@@ -943,7 +1038,7 @@ function ClientLeadsCRM({ onSwitchView }: { onSwitchView: (v: AdminView) => void
                 <tr key={app.id} className="hover:bg-slate-50/60 transition-colors">
                   <td className="px-5 py-3.5">
                     <p className="font-bold text-slate-900">{app.brandName}</p>
-                    <code className="text-[11px] font-mono text-indigo-600">{app.requestedSlug}.orvexatech.com</code>
+                    <code className="text-[11px] font-mono text-indigo-600">{storeAddress(app.requestedSlug)}</code>
                   </td>
                   <td className="px-4 py-3.5">
                     <p className="font-semibold text-slate-800">{app.ownerName}</p>
@@ -964,6 +1059,8 @@ function ClientLeadsCRM({ onSwitchView }: { onSwitchView: (v: AdminView) => void
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                         : app.status === 'pending'
                         ? 'bg-amber-50 text-amber-700 border-amber-200'
+                        : app.status === 'waitlist'
+                        ? 'bg-sky-50 text-sky-700 border-sky-200'
                         : 'bg-rose-50 text-rose-700 border-rose-200'
                     }`}>
                       {app.status}
@@ -989,9 +1086,10 @@ function ClientLeadsCRM({ onSwitchView }: { onSwitchView: (v: AdminView) => void
                       )}
                       {app.status === 'pending' && (
                         <button
-                          onClick={() => {
-                            approve(app.id)
-                            onSwitchView('stores')
+                          onClick={async () => {
+                            const { tenant, error } = await approve(app.id)
+                            if (tenant) onSwitchView('stores')
+                            else window.alert(error || 'Could not provision this store. Open Merchant Applications to review it.')
                           }}
                           className="px-2.5 py-1 text-[11px] font-bold bg-slate-950 hover:bg-slate-800 text-white rounded shadow-xs cursor-pointer"
                         >
@@ -1037,7 +1135,7 @@ function TenantDirectory({ onOpenProvisionModal }: { onOpenProvisionModal?: () =
 TENANT_ID=${t.id}
 TENANT_SLUG=${t.slug}
 BRAND_NAME="${t.brandName}"
-SUBDOMAIN=${t.slug}.orvexatech.com
+SUBDOMAIN=${storeAddress(t.slug)}
 CUSTOM_DOMAIN=${t.customDomain || ''}
 PRIMARY_COLOR="${t.theme.primaryColor}"
 ACCENT_COLOR="${t.theme.accentColor}"
@@ -1134,7 +1232,7 @@ ENABLE_CUSTOMER_REVIEWS=${t.theme.enableReviews}`
                 <tr key={tenant.id} className="hover:bg-slate-50/60 transition-colors">
                   <td className="px-5 py-3.5">
                     <p className="font-bold text-slate-900">{tenant.brandName}</p>
-                    <code className="text-[11px] font-mono text-indigo-600">{tenant.slug}.orvexatech.com</code>
+                    <code className="text-[11px] font-mono text-indigo-600">{storeAddress(tenant.slug)}</code>
                   </td>
                   <td className="px-4 py-3.5">
                     <span className="font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-[11px]">
@@ -1151,9 +1249,9 @@ ENABLE_CUSTOMER_REVIEWS=${t.theme.enableReviews}`
                       onChange={(e) => changePlan(tenant.id, e.target.value as 'starter' | 'pro' | 'enterprise')}
                       className="bg-slate-50 text-slate-800 text-xs font-semibold px-2 py-1 rounded border border-slate-200 cursor-pointer"
                     >
-                      <option value="starter">Starter</option>
-                      <option value="pro">Pro</option>
-                      <option value="enterprise">Enterprise</option>
+                      {PLAN_IDS.map((id) => (
+                        <option key={id} value={id}>{PLAN_CATALOG[id].label}</option>
+                      ))}
                     </select>
                   </td>
                   <td className="px-4 py-3.5">
@@ -1183,7 +1281,7 @@ ENABLE_CUSTOMER_REVIEWS=${t.theme.enableReviews}`
                         .env
                       </button>
                       <a
-                        href={`/?tenant=${tenant.slug}`}
+                        href={`/t/${tenant.slug}`}
                         target="_blank"
                         className="px-2 py-1 text-[11px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 transition-colors"
                       >
@@ -1309,7 +1407,7 @@ function BillingManager() {
             <div key={tenant.id} className="p-4 flex items-center justify-between">
               <div>
                 <p className="font-bold text-slate-900">{tenant.brandName}</p>
-                <p className="text-[11px] text-slate-400 font-mono capitalize">{tenant.plan} Plan • ₹{tenant.subscription.pricePerMonth}/mo</p>
+                <p className="text-[11px] text-slate-400 font-mono">{PLAN_CATALOG[normalizePlanId(tenant.plan)].label} • {formatPlanPrice(tenant.subscription.pricePerMonth)}</p>
               </div>
               <div className="flex items-center gap-3">
                 <span className="font-mono text-[11px] text-slate-500">Next: {tenant.subscription.nextBillingDate}</span>
@@ -1335,16 +1433,19 @@ function DomainManager() {
     <div className="space-y-6 max-w-6xl">
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/70">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Subdomains & Custom Domains</h3>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Store portals & custom domains</h3>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Every store gets orvexacloud.in/t/&lt;slug&gt; automatically. Merchants who want their own website add a CNAME to cname.orvexacloud.in from Store Settings.
+          </p>
         </div>
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50/70 text-slate-500 uppercase tracking-wider font-mono text-[10px]">
               <th className="text-left px-5 py-3">Store</th>
-              <th className="text-left px-4 py-3">Platform Subdomain</th>
+              <th className="text-left px-4 py-3">Platform portal</th>
               <th className="text-left px-4 py-3">Custom Domain</th>
-              <th className="text-left px-4 py-3">SSL Certificate</th>
-              <th className="text-right px-5 py-3">DNS Status</th>
+              <th className="text-left px-4 py-3">Seller portal</th>
+              <th className="text-right px-5 py-3">DNS</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -1352,19 +1453,29 @@ function DomainManager() {
               <tr key={tenant.id} className="hover:bg-slate-50/60">
                 <td className="px-5 py-3.5 font-bold text-slate-900">{tenant.brandName}</td>
                 <td className="px-4 py-3.5">
-                  <code className="text-indigo-600 font-mono">{tenant.slug}.orvexatech.com</code>
+                  <a href={`/t/${tenant.slug}`} target="_blank" rel="noreferrer" className="text-indigo-600 font-mono hover:underline">
+                    {storeAddress(tenant.slug)}
+                  </a>
                 </td>
                 <td className="px-4 py-3.5 font-mono text-slate-600">
-                  {tenant.customDomain || <span className="text-slate-300">Not mapped</span>}
+                  {tenant.customDomain ? (
+                    <span>
+                      {tenant.customDomain}{' '}
+                      <span className={tenant.customDomainVerified ? 'text-emerald-700' : 'text-amber-700'}>
+                        {tenant.customDomainVerified ? 'connected' : 'pending DNS'}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-slate-300">Not mapped</span>
+                  )}
                 </td>
                 <td className="px-4 py-3.5">
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    Automated Let&apos;s Encrypt SSL
-                  </span>
+                  <a href={`/t/${tenant.slug}/dashboard`} className="text-[11px] font-semibold text-indigo-700 hover:underline">
+                    /t/{tenant.slug}/dashboard
+                  </a>
                 </td>
                 <td className="px-5 py-3.5 text-right font-mono font-bold text-emerald-700">
-                  ACTIVE
+                  {tenant.customDomain ? (tenant.customDomainVerified ? 'LIVE' : 'WAIT') : 'PORTAL'}
                 </td>
               </tr>
             ))}

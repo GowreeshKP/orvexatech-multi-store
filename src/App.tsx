@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { Fragment, useState, useMemo, useEffect, useRef, type ComponentProps, type ComponentType, type CSSProperties } from 'react'
 import DashboardApp from './layers/DashboardApp'
 import AdminApp from './layers/AdminApp'
 import { useApplicationLayer, useTenant, useSwitchLayer } from './context/TenantContext'
@@ -6,17 +6,34 @@ import { useAuth } from './context/AuthContext'
 import { mockStore } from './api/mock-store'
 import { auditLogger } from './api/audit-logger'
 import { authService, DEFAULT_DEMO_SELLER_CREDENTIALS } from './api/auth'
+import { DEMO_SHOPPER, shopperAccounts } from './api/shopper-accounts'
+import { storeInbox } from './api/store-messages'
 import { MOCK_TENANTS } from './data/mock-tenants'
-import type { TenantConfig } from './types/tenant'
+import {
+  getStoreCategories,
+  getCategoryLabel,
+  getStorefrontCopy,
+  getShippingConfig,
+  getHomeSections,
+  isPdpOptionEnabled,
+  isTemplateStore,
+} from './data/store-niches'
+import type { HomeSectionId, TenantConfig } from './types/tenant'
 import CommonLoginModal from './components/auth/CommonLoginModal'
 import ResetPasswordModal from './components/auth/ResetPasswordModal'
 import { LegalComplianceModal, ComplianceFooterLinks, type ComplianceDocType } from './components/compliance/LegalComplianceModal'
+import { StoreModuleContext, applyStoreTheme, useStoreComponent, useStoreModule } from './tenants/loader'
+import type { StoreModule, StoreSection } from './tenants/store-module'
+import StoreNotFound from './components/platform/StoreNotFound'
+import { submitStorefrontOrder, trackStorefrontEvent } from './api/storefront-analytics'
+import { storefrontUrl, sellerPortalUrl } from './lib/store-urls'
+import { apiClient } from './api/client'
 
 // --- THE LUNAR CLOTHING OFFICIAL PRODUCT DATASET ---
 export interface Product {
   id: number
   name: string
-  category: 'maxis' | 'dresses' | 'kalamkari' | 'handloom' | 'all'
+  category: string
   sculptLevel: string
   fabricTech: string
   fabricDesc: string
@@ -86,6 +103,7 @@ export interface TrackedOrder {
   shipping: number
   total: number
   paymentMethod: string
+  customerEmail?: string
   shippingAddress: {
     name: string
     phone: string
@@ -723,18 +741,8 @@ function Navigation({
   const switchLayer = useSwitchLayer()
   const [megaOpen, setMegaOpen] = useState(false)
 
-  // Derive unique categories from products
-  const categoryList = useMemo(() => {
-    return Array.from(new Set(products.map((p) => p.category)))
-  }, [products])
-
-  const formatCatName = (cat: string) => {
-    if (cat === 'maxis') return 'Kurtas & Maxis'
-    if (cat === 'dresses') return 'Sarees & Dresses'
-    if (cat === 'kalamkari') return 'Artisanal Prints & Stoles'
-    if (cat === 'handloom') return 'Handloom Weaves'
-    return cat.charAt(0).toUpperCase() + cat.slice(1)
-  }
+  const categoryList = useMemo(() => getStoreCategories(tenant, products), [tenant, products])
+  const copy = getStorefrontCopy(tenant)
 
   const featuredProduct = products[0] || null
 
@@ -783,19 +791,28 @@ function Navigation({
               {megaOpen && (
                 <div className="absolute top-full left-0 w-[840px] bg-white border border-black/10 shadow-2xl p-8 grid grid-cols-4 gap-8 z-50 normal-case tracking-normal animate-slide-down">
                   {categoryList.slice(0, 3).map((cat) => {
-                    const catProducts = products.filter((p) => p.category === cat)
+                    const catProducts = products.filter((p) => p.category === cat.slug)
                     return (
-                      <div key={cat}>
-                        <p className="text-xs font-bold tracking-widest uppercase text-black/40 mb-4">
-                          {formatCatName(cat)}
-                        </p>
+                      <div key={cat.slug}>
+                        <button
+                          onClick={() => {
+                            setMegaOpen(false)
+                            onNavigate('catalog', cat.slug)
+                          }}
+                          className="text-xs font-bold tracking-widest uppercase text-black/40 hover:text-black mb-4 cursor-pointer text-left"
+                        >
+                          {cat.name}
+                        </button>
                         <ul className="space-y-2.5 text-sm text-black/80 font-normal">
+                          {catProducts.length === 0 && (
+                            <li className="text-xs text-black/40 italic">Coming soon</li>
+                          )}
                           {catProducts.slice(0, 3).map((p) => (
                             <li key={p.id}>
                               <button
                                 onClick={() => {
                                   setMegaOpen(false)
-                                  onNavigate('catalog', cat)
+                                  onNavigate('catalog', cat.slug)
                                 }}
                                 className="hover:font-semibold flex items-center justify-between w-full cursor-pointer text-left"
                               >
@@ -813,7 +830,16 @@ function Navigation({
                     )
                   })}
 
-                  <div className="bg-stone-100 p-4 relative group/card overflow-hidden">
+                  <div
+                    className="bg-stone-100 p-4 relative group/card overflow-hidden"
+                    style={featuredProduct ? undefined : { background: `linear-gradient(135deg, ${tenant?.theme?.primaryColor || '#1f2937'}, ${tenant?.theme?.accentColor || '#6b7280'})` }}
+                  >
+                    {!featuredProduct && (
+                      <div className="relative h-full flex flex-col justify-end text-white">
+                        <p className="text-[10px] tracking-widest uppercase font-bold text-white/70">{copy.collectionEyebrow}</p>
+                        <p className="text-base font-serif leading-tight mb-2">{copy.comingSoonTitle}</p>
+                      </div>
+                    )}
                     {featuredProduct && (
                       <>
                         <img
@@ -971,8 +997,8 @@ function MobileMenuDrawer({
   if (!isOpen) return null
 
   const switchLayer = useSwitchLayer()
-  const safeProducts = products || PRODUCTS
-  const categories = Array.from(new Set(safeProducts.map((p) => p.category)))
+  const categories = getStoreCategories(tenant, products || [])
+  const copy = getStorefrontCopy(tenant)
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden md:hidden">
@@ -1001,18 +1027,18 @@ function MobileMenuDrawer({
               </button>
               {categories.map((cat) => (
                 <button
-                  key={cat}
-                  onClick={() => { onClose(); onNavigate('catalog', cat) }}
+                  key={cat.slug}
+                  onClick={() => { onClose(); onNavigate('catalog', cat.slug) }}
                   className="text-left py-2 hover:text-black/60 border-b border-black/5 cursor-pointer"
                 >
-                  {cat.toUpperCase()}
+                  {cat.name.toUpperCase()}
                 </button>
               ))}
               <button
                 onClick={() => { onClose(); onOpenAbout() }}
                 className="text-left py-2 hover:text-black/60 border-b border-black/5 cursor-pointer text-amber-900"
               >
-                ABOUT OUR STUDIO
+                {copy.mobileAboutLabel}
               </button>
               <button
                 onClick={() => { onClose(); onOpenContact() }}
@@ -1162,12 +1188,15 @@ function HeroSection({
   tenant?: TenantConfig | null
   onShopClick: () => void
 }) {
-  const heroImage = tenant?.theme?.heroImage || 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243'
+  const copy = getStorefrontCopy(tenant)
+  const heroImage =
+    tenant?.theme?.heroImage ||
+    (isTemplateStore(tenant) ? '' : 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_5227_1.jpg?v=1778607243')
   const brandTitle = tenant?.brandName || 'THE LUNAR CLOTHING'
   const headline = tenant?.theme?.heroHeadline || tenant?.tagline || brandTitle
-  const subhead = tenant?.theme?.heroSubhead || 'Handcrafted collections with pure breathable fabrics, master heritage craftsmanship, and functional luxury details.'
+  const subhead = tenant?.theme?.heroSubhead || copy.heroSubhead
   const ctaText = tenant?.theme?.heroCtaText || 'EXPLORE COLLECTIONS →'
-  const announcementSub = tenant?.theme?.announcementMessages?.[0] || 'HANDCRAFTED ARTISANAL ETHNIC COLLECTION'
+  const announcementSub = tenant?.theme?.copy?.heroBadge?.trim() || tenant?.theme?.announcementMessages?.[0] || copy.heroBadge
 
   const handleExploreClick = (e: React.MouseEvent<HTMLButtonElement | HTMLDivElement>) => {
     // Dynamic luxury click ripple effect
@@ -1201,11 +1230,18 @@ function HeroSection({
 
   return (
     <section className="relative h-[92vh] min-h-[640px] bg-stone-950 flex items-center justify-center overflow-hidden">
-      <img
-        src={heroImage}
-        alt={brandTitle}
-        className="absolute inset-0 w-full h-full object-cover object-center opacity-65 scale-[1.04] transition-all duration-1000"
-      />
+      {heroImage ? (
+        <img
+          src={heroImage}
+          alt={brandTitle}
+          className="absolute inset-0 w-full h-full object-cover object-center opacity-65 scale-[1.04] transition-all duration-1000"
+        />
+      ) : (
+        <div
+          className="absolute inset-0 opacity-80"
+          style={{ background: `radial-gradient(circle at 25% 20%, ${tenant?.theme?.accentColor || '#6b7280'} 0%, transparent 55%), linear-gradient(135deg, ${tenant?.theme?.primaryColor || '#1f2937'} 0%, #0a0a0a 100%)` }}
+        />
+      )}
       {/* Multi-layer gradient for depth */}
       <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.96) 0%, rgba(0,0,0,0.55) 40%, rgba(0,0,0,0.15) 70%, rgba(0,0,0,0.3) 100%)' }} />
       <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, rgba(0,0,0,0.3) 0%, transparent 40%, transparent 60%, rgba(0,0,0,0.2) 100%)' }} />
@@ -1262,25 +1298,8 @@ function HeroSection({
 
 // 4. Trust Banner - Moving Ticker
 function TrustBar({ tenant }: { tenant?: TenantConfig | null }) {
-  const brandShort = tenant?.brandName?.split(' ')?.[0] || 'LUNAR'
-  const items = [
-    { icon: '✈️', text: 'FREE SHIPPING IN INDIA > ₹999', accent: false },
-    { icon: '🌿', text: '100% AUTHENTIC ARTISANAL CRAFT', accent: false },
-    { icon: '🛡️', text: 'QUALITY CERTIFIED & TESTED', accent: false },
-    { icon: '⭐', text: `10,000+ HAPPY ${brandShort.toUpperCase()} CLIENTS`, accent: true },
-    { icon: '🧵', text: 'HANDLOOM & HERITAGE WEAVES', accent: false },
-    { icon: '✨', text: '100% SATISFACTION GUARANTEE', accent: false },
-    { icon: '📦', text: '2–5 DAY EXPRESS DELIVERY', accent: false },
-    { icon: '🔄', text: '30-DAY EASY RETURNS', accent: false },
-    { icon: '✈️', text: 'FREE SHIPPING IN INDIA > ₹999', accent: false },
-    { icon: '🌿', text: '100% AUTHENTIC ARTISANAL CRAFT', accent: false },
-    { icon: '🛡️', text: 'QUALITY CERTIFIED & TESTED', accent: false },
-    { icon: '⭐', text: `10,000+ HAPPY ${brandShort.toUpperCase()} CLIENTS`, accent: true },
-    { icon: '🧵', text: 'HANDLOOM & HERITAGE WEAVES', accent: false },
-    { icon: '✨', text: '100% SATISFACTION GUARANTEE', accent: false },
-    { icon: '📦', text: '2–5 DAY EXPRESS DELIVERY', accent: false },
-    { icon: '🔄', text: '30-DAY EASY RETURNS', accent: false },
-  ]
+  const trustItems = getStorefrontCopy(tenant).trustItems
+  const items = [...trustItems, ...trustItems]
 
   return (
     <div className="border-y border-black/8 py-3 overflow-hidden relative select-none z-10" style={{ background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(8px)' }}>
@@ -1299,8 +1318,13 @@ function TrustBar({ tenant }: { tenant?: TenantConfig | null }) {
   )
 }
 
-// 5. Product Card
-function ProductCard({
+// 5. Product Card (a store can replace it from src/tenants/<slug>/components/)
+function ProductCard(props: ComponentProps<typeof DefaultProductCard>) {
+  const Custom = useStoreComponent('ProductCard')
+  return Custom ? <Custom {...props} Default={DefaultProductCard} /> : <DefaultProductCard {...props} />
+}
+
+function DefaultProductCard({
   product,
   isWishlisted,
   onToggleWishlist,
@@ -1340,9 +1364,11 @@ function ProductCard({
               {product.badge}
             </span>
           )}
+          {product.sculptLevel && (
           <span className="text-[9px] font-mono font-bold tracking-wider px-2 py-0.5 text-black" style={{ background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(8px)', border: '1px solid rgba(0,0,0,0.08)' }}>
             {product.sculptLevel}
           </span>
+          )}
         </div>
 
         {/* Wishlist Heart Button */}
@@ -1360,11 +1386,13 @@ function ProductCard({
         </button>
 
         {/* Rating badge overlay */}
+        {product.reviewsCount > 0 && (
         <div className="absolute bottom-3 left-3 z-10 flex items-center gap-1 px-2 py-0.5" style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)', borderRadius: '2px' }}>
           <span className="text-amber-400 text-[10px]">★</span>
           <span className="text-white text-[10px] font-bold">{product.rating}</span>
           <span className="text-white/50 text-[9px]">({product.reviewsCount})</span>
         </div>
+        )}
 
         {/* Hover Quick View overlay button */}
         <div className="absolute inset-x-3 bottom-3 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-y-2 group-hover:translate-y-0 z-20">
@@ -1420,30 +1448,46 @@ function BestsellersSection({
   wishlist,
   onToggleWishlist,
   onSelectProduct,
+  onViewAll,
 }: {
   tenant?: TenantConfig | null
   products: Product[]
   wishlist: number[]
   onToggleWishlist: (id: number) => void
   onSelectProduct: (id: number) => void
+  onViewAll: () => void
 }) {
-  const brandName = tenant?.brandName || 'The Lunar Clothing'
+  const copy = getStorefrontCopy(tenant)
   return (
     <section id="collections-section" className="py-20 bg-white/70 backdrop-blur-xs relative z-10 scroll-mt-14 transition-all duration-700">
       <div className="max-w-screen-2xl mx-auto px-6 mb-8 flex items-end justify-between">
         <div>
-          <p className="text-xs font-bold tracking-[0.25em] uppercase text-black/40 mb-2">HANDCRAFTED ARTISANAL COLLECTION</p>
+          <p className="text-xs font-bold tracking-[0.25em] uppercase text-black/40 mb-2">{copy.collectionEyebrow}</p>
           <h2 className="text-4xl md:text-5xl font-normal text-black" style={{ fontFamily: 'var(--font-display)' }}>
-            {tenant?.brandName ? `${tenant.brandName.split(' ')[0]} Bestsellers` : 'Signature Bestsellers'}
+            {tenant?.brandName ? copy.bestsellersTitle : 'Signature Bestsellers'}
           </h2>
         </div>
-        <button
-          onClick={() => onSelectProduct(products[0]?.id || 1)}
-          className="text-xs font-bold tracking-widest uppercase text-black hover:text-black/60 border-b border-black pb-0.5 cursor-pointer"
-        >
-          VIEW ALL PRODUCTS →
-        </button>
+        {products.length > 0 && (
+          <button
+            onClick={onViewAll}
+            className="text-xs font-bold tracking-widest uppercase text-black hover:text-black/60 border-b border-black pb-0.5 cursor-pointer"
+          >
+            {copy.viewAllText}
+          </button>
+        )}
       </div>
+
+      {products.length === 0 && (
+        <div className="max-w-screen-2xl mx-auto px-6">
+          <div className="border border-dashed border-black/15 bg-white/80 py-16 px-6 text-center">
+            <p className="text-3xl mb-3">🛍️</p>
+            <h3 className="text-2xl font-normal text-black mb-2" style={{ fontFamily: 'var(--font-display)' }}>
+              {copy.comingSoonTitle}
+            </h3>
+            <p className="text-sm text-black/55 max-w-md mx-auto">{copy.comingSoonBody}</p>
+          </div>
+        </div>
+      )}
 
       <div className="pl-6 md:pl-[max(24px,calc((100vw-1536px)/2+24px))] flex gap-6 overflow-x-auto scroll-hide pb-6">
         {products.map((product) => (
@@ -1462,6 +1506,7 @@ function BestsellersSection({
 
 // 8. Shop By Category Dark Carousel Section
 function ShopByCategorySection({
+  tenant,
   products,
   onSelectCategory,
 }: {
@@ -1479,32 +1524,24 @@ function ShopByCategorySection({
     if (el) el.scrollBy({ left: 520, behavior: 'smooth' })
   }
 
-  const categories = useMemo(() => {
-    const map = new Map<string, { name: string; category: string; img: string }>()
-    products.forEach((p) => {
-      if (!map.has(p.category)) {
-        const displayName = p.category === 'maxis' ? 'KURTAS & MAXIS →'
-          : p.category === 'dresses' ? 'SAREES & DRESSES →'
-          : p.category === 'kalamkari' ? 'PRINTS & STOLES →'
-          : p.category === 'handloom' ? 'HANDLOOM WEAVES →'
-          : `${p.category.toUpperCase()} →`
+  const categories = useMemo(
+    () =>
+      getStoreCategories(tenant, products).map((c) => ({
+        name: `${c.name.toUpperCase()} →`,
+        category: c.slug,
+        img: c.image,
+      })),
+    [tenant, products]
+  )
 
-        map.set(p.category, {
-          name: displayName,
-          category: p.category,
-          img: p.imgMain,
-        })
-      }
-    })
-    return Array.from(map.values())
-  }, [products])
+  if (categories.length === 0) return null
 
   return (
     <section className="py-24 md:py-32 bg-[#141414] text-white border-t border-white/10 select-none">
       <div className="max-w-screen-2xl mx-auto px-6 mb-10 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h2 className="text-sm md:text-base font-bold tracking-[0.25em] uppercase text-white/90">
-            SHOP BY CATEGORY
+            {getStorefrontCopy(tenant).categoriesTitle}
           </h2>
           <span className="text-sm text-white/50">↘</span>
         </div>
@@ -1539,11 +1576,25 @@ function ShopByCategorySection({
             className="flex-shrink-0 w-[82vw] sm:w-[420px] md:w-[480px] lg:w-[540px] group cursor-pointer"
           >
             <div className="relative aspect-[3/4] md:h-[680px] lg:h-[740px] w-full overflow-hidden bg-stone-900 shadow-2xl border border-white/10 mb-4">
-              <img
-                src={cat.img}
-                alt={cat.name}
-                className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-700"
-              />
+              {cat.img ? (
+                <img
+                  src={cat.img}
+                  alt={cat.name}
+                  className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-700"
+                />
+              ) : (
+                <div
+                  className="w-full h-full flex items-center justify-center p-10 group-hover:scale-105 transition-transform duration-700"
+                  style={{ background: `linear-gradient(160deg, ${tenant?.theme?.primaryColor || '#1f2937'} 0%, #0a0a0a 100%)` }}
+                >
+                  <span
+                    className="text-4xl md:text-5xl text-white/90 uppercase text-center leading-tight"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    {cat.name.replace(' →', '')}
+                  </span>
+                </div>
+              )}
             </div>
             <p className="text-xs md:text-sm font-bold tracking-[0.2em] uppercase text-white group-hover:underline underline-offset-4 font-sans">
               {cat.name}
@@ -1557,6 +1608,7 @@ function ShopByCategorySection({
 
 // 9. Fabric Matrix
 function LeggingsFabricMatrix({
+  tenant,
   products,
   onSelectProduct,
 }: {
@@ -1564,23 +1616,27 @@ function LeggingsFabricMatrix({
   products: Product[]
   onSelectProduct: (id: number) => void
 }) {
+  const copy = getStorefrontCopy(tenant)
+  const isTemplate = isTemplateStore(tenant)
   const fabrics = useMemo(() => {
     return products.slice(0, 4).map((p, idx) => ({
       num: `0${idx + 1}`,
-      title: `${p.fabricTech.toUpperCase()}©`,
+      title: isTemplate ? (p.fabricTech || p.name).toUpperCase() : `${p.fabricTech.toUpperCase()}©`,
       sculpt: p.sculptLevel,
-      desc: p.fabricDesc,
+      desc: isTemplate ? p.fabricDesc || p.desc : p.fabricDesc,
       img: p.imgMain,
       id: p.id,
     }))
-  }, [products])
+  }, [products, isTemplate])
+
+  if (fabrics.length === 0) return null
 
   return (
     <section className="py-20 bg-[#F5F4F1]/75 backdrop-blur-xs relative z-10">
       <div className="max-w-screen-2xl mx-auto px-6 mb-12">
-        <p className="text-xs font-bold tracking-[0.25em] uppercase text-black/40 mb-2">CRAFT & FABRIC MATRIX</p>
+        <p className="text-xs font-bold tracking-[0.25em] uppercase text-black/40 mb-2">{copy.featuredEyebrow}</p>
         <h2 className="text-4xl md:text-5xl font-normal text-black" style={{ fontFamily: 'var(--font-display)' }}>
-          Signature Fabric Weaves
+          {copy.featuredTitle}
         </h2>
       </div>
 
@@ -1600,15 +1656,17 @@ function LeggingsFabricMatrix({
             <div className="absolute inset-0 p-6 flex flex-col justify-between text-white">
               <div className="flex items-center justify-between">
                 <span className="text-3xl font-serif text-white/50">{f.num}</span>
-                <span className="text-[9px] font-mono tracking-widest bg-white/20 backdrop-blur-md text-white px-2 py-0.5">
-                  {f.sculpt}
-                </span>
+                {f.sculpt && (
+                  <span className="text-[9px] font-mono tracking-widest bg-white/20 backdrop-blur-md text-white px-2 py-0.5">
+                    {f.sculpt}
+                  </span>
+                )}
               </div>
               <div>
                 <h3 className="text-2xl font-serif leading-tight mb-1">{f.title}</h3>
                 <p className="text-xs text-white/70 leading-relaxed mb-4">{f.desc}</p>
                 <span className="text-xs font-bold tracking-widest uppercase underline underline-offset-4 group-hover:text-white">
-                  EXPLORE WEAVE →
+                  {copy.featuredCta}
                 </span>
               </div>
             </div>
@@ -1621,6 +1679,7 @@ function LeggingsFabricMatrix({
 
 // 10. Triptych Category Banner
 function ActivityTriptych({
+  tenant,
   products,
   onSelectProduct,
 }: {
@@ -1628,6 +1687,7 @@ function ActivityTriptych({
   products: Product[]
   onSelectProduct: (id: number) => void
 }) {
+  const copy = getStorefrontCopy(tenant)
   const activities = useMemo(() => {
     return products.slice(0, 3).map((p) => ({
       title: p.name.toUpperCase(),
@@ -1635,6 +1695,8 @@ function ActivityTriptych({
       id: p.id,
     }))
   }, [products])
+
+  if (activities.length === 0) return null
 
   return (
     <section className="grid grid-cols-1 md:grid-cols-3 h-[65vh] min-h-[480px]">
@@ -1651,7 +1713,7 @@ function ActivityTriptych({
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
           <div className="absolute bottom-8 left-8 text-white max-w-xs">
-            <p className="text-xs tracking-[0.2em] font-semibold uppercase text-white/60 mb-2">← EXPLORE RANGE</p>
+            <p className="text-xs tracking-[0.2em] font-semibold uppercase text-white/60 mb-2">{copy.triptychEyebrow}</p>
             <h3 className="text-3xl md:text-4xl font-serif uppercase tracking-tight line-clamp-2">{a.title}</h3>
           </div>
         </div>
@@ -1669,32 +1731,41 @@ function MissionBlock({
   onShopClick: () => void
 }) {
   const brandName = tenant?.brandName || 'The Lunar Clothing'
-  const owner = tenant?.ownerName || 'Our Artisans'
-  const bgImg = tenant?.theme?.heroImage || 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2171_1.jpg?v=1766941862'
+  const copy = getStorefrontCopy(tenant)
+  const bgImg =
+    tenant?.theme?.heroImage ||
+    (isTemplateStore(tenant) ? '' : 'https://cdn.shopify.com/s/files/1/0957/7549/0340/files/IMG_2171_1.jpg?v=1766941862')
 
   return (
     <section className="relative py-36 md:py-48 bg-stone-950 text-center text-white overflow-hidden select-none border-t border-white/10">
-      <img
-        src={bgImg}
-        alt={`${brandName} Philosophy`}
-        className="absolute inset-0 w-full h-full object-cover opacity-25 object-center"
-      />
+      {bgImg ? (
+        <img
+          src={bgImg}
+          alt={`${brandName} Philosophy`}
+          className="absolute inset-0 w-full h-full object-cover opacity-25 object-center"
+        />
+      ) : (
+        <div
+          className="absolute inset-0 opacity-40"
+          style={{ background: `linear-gradient(180deg, ${tenant?.theme?.primaryColor || '#1f2937'} 0%, transparent 100%)` }}
+        />
+      )}
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/30" />
 
       <div className="relative z-10 max-w-3xl mx-auto px-6">
         <p className="text-[11px] font-bold tracking-[0.3em] uppercase text-white/70 mb-4 font-mono">
-          THE {brandName.toUpperCase()} PHILOSOPHY
+          {copy.missionEyebrow}
         </p>
 
         <h2
           className="text-6xl sm:text-7xl md:text-8xl lg:text-9xl font-normal leading-none uppercase mb-6 tracking-tight text-white"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          LESS BUT BETTER.
+          {copy.missionHeadline}
         </h2>
 
         <p className="text-xs sm:text-sm md:text-base font-light text-white/80 max-w-xl mx-auto mb-10 leading-relaxed font-sans">
-          {brandName} was founded with a genuine desire for less but better. Pure artisanal fabrics, conscious craftsmanship, and timeless quality created to last.
+          {copy.missionBody}
         </p>
 
         <div className="flex items-center justify-center">
@@ -1702,7 +1773,7 @@ function MissionBlock({
             onClick={onShopClick}
             className="bg-white text-black font-bold text-xs tracking-[0.2em] uppercase px-8 py-3.5 hover:bg-black hover:text-white border border-white transition-all shadow-2xl active:scale-95 cursor-pointer"
           >
-            OUR STORY →
+            {copy.missionCta}
           </button>
         </div>
       </div>
@@ -1714,15 +1785,19 @@ function MissionBlock({
 function CustomerReviewsSection({
   productId,
   reviews,
+  isTemplate = false,
   onAddReviewClick,
 }: {
   productId: number
   reviews: Review[]
+  isTemplate?: boolean
   onAddReviewClick: () => void
 }) {
-  const productReviews = reviews.filter((r) => r.productId === productId || r.productId === 1)
+  const productReviews = reviews.filter((r) => r.productId === productId || (!isTemplate && r.productId === 1))
   const avgRating = productReviews.length
     ? (productReviews.reduce((sum, r) => sum + r.rating, 0) / productReviews.length).toFixed(1)
+    : isTemplate
+    ? '–'
     : '4.9'
 
   return (
@@ -1745,16 +1820,24 @@ function CustomerReviewsSection({
       <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-12 bg-stone-50 border border-black/10 p-6 md:p-8">
         <div className="md:col-span-4 flex flex-col items-center justify-center text-center border-b md:border-b-0 md:border-r border-black/10 pr-0 md:pr-8 pb-6 md:pb-0">
           <span className="text-5xl font-bold font-serif text-black">{avgRating}</span>
-          <div className="text-amber-500 text-lg my-1">★★★★★</div>
+          <div className={`text-lg my-1 ${isTemplate && productReviews.length === 0 ? 'text-stone-300' : 'text-amber-500'}`}>★★★★★</div>
           <p className="text-xs text-black/50 uppercase tracking-wider font-semibold">
-            Based on {productReviews.length} Verified Buyer Reviews
+            {isTemplate && productReviews.length === 0
+              ? 'No reviews yet — be the first'
+              : `Based on ${productReviews.length} Verified Buyer Reviews`}
           </p>
         </div>
 
         <div className="md:col-span-8 flex flex-col justify-center space-y-2 text-xs">
           {[5, 4, 3, 2, 1].map((stars) => {
             const count = productReviews.filter((r) => r.rating === stars).length
-            const pct = productReviews.length ? Math.round((count / productReviews.length) * 100) : stars === 5 ? 85 : 15
+            const pct = productReviews.length
+              ? Math.round((count / productReviews.length) * 100)
+              : isTemplate
+              ? 0
+              : stars === 5
+              ? 85
+              : 15
             return (
               <div key={stars} className="flex items-center gap-3">
                 <span className="w-10 font-bold text-black">{stars} Stars</span>
@@ -1801,8 +1884,10 @@ function WriteReviewModal({
   isOpen,
   onClose,
   onSaveReview,
+  prompt,
 }: {
   isOpen: boolean
+  prompt: string
   onClose: () => void
   onSaveReview: (review: { author: string; rating: number; title: string; comment: string }) => void
 }) {
@@ -1828,7 +1913,7 @@ function WriteReviewModal({
         </button>
 
         <h3 className="text-2xl font-serif text-black mb-2">Write a Product Review</h3>
-        <p className="text-xs text-black/60 mb-6">Share your honest experience with The Lunar Clothing cotton fabric, sizing & fit.</p>
+        <p className="text-xs text-black/60 mb-6">{prompt}</p>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
           <div>
@@ -1864,7 +1949,7 @@ function WriteReviewModal({
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Loved the pockets & soft fabric!"
+              placeholder="e.g. Exactly what I was looking for!"
               className="w-full border border-black/20 p-2.5 outline-none focus:border-black"
             />
           </div>
@@ -1876,7 +1961,7 @@ function WriteReviewModal({
               rows={4}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder="How does it fit? How is the cotton quality?"
+              placeholder="What did you like? How was the quality?"
               className="w-full border border-black/20 p-2.5 outline-none focus:border-black"
             />
           </div>
@@ -1926,9 +2011,17 @@ function ProductDetailPage({
   onSelectProduct: (id: number) => void
   onSaveReview: (review: { author: string; rating: number; title: string; comment: string }) => void
 }) {
-  const [selectedColor, setSelectedColor] = useState(product.colors[0])
-  const availableSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
-  const [selectedSize, setSelectedSize] = useState('S')
+  const copy = getStorefrontCopy(tenant)
+  const isTemplate = isTemplateStore(tenant)
+  const showZoom = isPdpOptionEnabled(tenant, 'zoom')
+  const showGuarantee = isPdpOptionEnabled(tenant, 'guarantee')
+  const showDetails = isPdpOptionEnabled(tenant, 'details')
+  const showShipping = isPdpOptionEnabled(tenant, 'shipping')
+  const showRelated = isPdpOptionEnabled(tenant, 'related')
+  const showReviews = tenant?.theme?.enableReviews ?? true
+  const [selectedColor, setSelectedColor] = useState(product.colors[0] || { name: '', hex: '' })
+  const availableSizes = isTemplate ? product.sizes || [] : ['XS', 'S', 'M', 'L', 'XL', 'XXL']
+  const [selectedSize, setSelectedSize] = useState(isTemplate ? product.sizes?.[0] || '' : 'S')
 
   const [selectedLining, setSelectedLining] = useState<'No Lining' | 'Lining'>('No Lining')
   const [selectedZip, setSelectedZip] = useState<'None' | 'Double Zip' | 'Center Zip'>('None')
@@ -1936,23 +2029,34 @@ function ProductDetailPage({
 
   const [activeImageIndex, setActiveImageIndex] = useState(0)
   const [quantity, setQuantity] = useState(1)
-  const [openAccordion, setOpenAccordion] = useState<'fabric' | 'fit' | 'shipping' | null>('fabric')
+  const [openAccordion, setOpenAccordion] = useState<'fabric' | 'fit' | 'shipping' | null>(
+    isPdpOptionEnabled(tenant, 'details') ? 'fabric' : 'shipping'
+  )
   const [showSizeGuide, setShowSizeGuide] = useState(false)
+
+  useEffect(() => {
+    if (!showSizeGuide) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowSizeGuide(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [showSizeGuide])
   const [showWriteReview, setShowWriteReview] = useState(false)
   const [addedToast, setAddedToast] = useState(false)
   const [isZoomed, setIsZoomed] = useState(false)
   const [zoomPos, setZoomPos] = useState({ x: 50, y: 50 })
 
-  const liningPrice = selectedLining === 'Lining' ? 100 : 0
-  const zipPrice = selectedZip === 'Double Zip' ? 120 : selectedZip === 'Center Zip' ? 100 : 0
-  const lengthPrice = selectedLength === '46 inch' ? 50 : selectedLength === '48 inch' ? 80 : selectedLength === '50 inch' ? 100 : 0
+  const liningPrice = !isTemplate && selectedLining === 'Lining' ? 100 : 0
+  const zipPrice = isTemplate ? 0 : selectedZip === 'Double Zip' ? 120 : selectedZip === 'Center Zip' ? 100 : 0
+  const lengthPrice = isTemplate ? 0 : selectedLength === '46 inch' ? 50 : selectedLength === '48 inch' ? 80 : selectedLength === '50 inch' ? 100 : 0
 
   const unitPrice = product.price + liningPrice + zipPrice + lengthPrice
   const totalPrice = unitPrice * quantity
 
   const activeImage = product.images[activeImageIndex] || product.imgMain
   const isWishlisted = wishlist.includes(product.id)
-  const isSoldOut = selectedSize === 'XS'
+  const isSoldOut = !isTemplate && selectedSize === 'XS'
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -1963,7 +2067,11 @@ function ProductDetailPage({
 
   const handleAdd = () => {
     if (isSoldOut) return
-    onAddToCart(product, selectedColor, selectedSize, selectedLining, selectedZip, selectedLength, quantity, unitPrice)
+    if (isTemplate) {
+      onAddToCart(product, selectedColor, selectedSize, '', '', '', quantity, unitPrice)
+    } else {
+      onAddToCart(product, selectedColor, selectedSize, selectedLining, selectedZip, selectedLength, quantity, unitPrice)
+    }
     setAddedToast(true)
     setTimeout(() => setAddedToast(false), 2500)
   }
@@ -1978,7 +2086,7 @@ function ProductDetailPage({
               STORE
             </button>
             <span>/</span>
-            <span className="capitalize">{product.category}</span>
+            <span className="capitalize">{getCategoryLabel(tenant, product.category)}</span>
             <span>/</span>
             <span className="text-black font-semibold">{product.name}</span>
           </div>
@@ -2011,8 +2119,8 @@ function ProductDetailPage({
 
             {/* Main Display Image */}
             <div
-              className="relative flex-1 aspect-[4/5] bg-stone-100 overflow-hidden shadow-sm cursor-zoom-in"
-              onMouseEnter={() => setIsZoomed(true)}
+              className={`relative flex-1 aspect-[4/5] bg-stone-100 overflow-hidden shadow-sm ${showZoom ? 'cursor-zoom-in' : ''}`}
+              onMouseEnter={() => showZoom && setIsZoomed(true)}
               onMouseLeave={() => setIsZoomed(false)}
               onMouseMove={handleMouseMove}
             >
@@ -2034,18 +2142,22 @@ function ProductDetailPage({
                   SOLD OUT
                 </span>
               )}
-              <span className="absolute bottom-4 right-4 bg-white/90 backdrop-blur-md text-black text-[10px] font-bold tracking-widest uppercase px-2.5 py-1">
-                🔍 HOVER TO MAGNIFY FABRIC
-              </span>
+              {showZoom && (
+                <span className="absolute bottom-4 right-4 bg-white/90 backdrop-blur-md text-black text-[10px] font-bold tracking-widest uppercase px-2.5 py-1">
+                  {copy.pdpMagnifyHint}
+                </span>
+              )}
             </div>
           </div>
 
           {/* Right Product Options & Customizations */}
           <div className="lg:col-span-5 flex flex-col justify-start">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] font-mono font-bold bg-black text-white px-2 py-0.5">
-                {product.sculptLevel}
-              </span>
+              {product.sculptLevel && (
+                <span className="text-[10px] font-mono font-bold bg-black text-white px-2 py-0.5">
+                  {product.sculptLevel}
+                </span>
+              )}
               <span className="text-xs font-bold tracking-[0.25em] uppercase text-black/40">
                 {product.fabricTech}
               </span>
@@ -2058,9 +2170,15 @@ function ProductDetailPage({
             {/* Rating & Dynamic Price row */}
             <div className="flex items-center justify-between border-b border-black/10 pb-4 mb-6">
               <div className="flex items-center gap-2">
-                <div className="flex text-amber-500 text-sm">★★★★★</div>
-                <span className="text-xs font-semibold text-black">{product.rating}</span>
-                <span className="text-xs text-black/40">({product.reviewsCount} verified reviews)</span>
+                {!showReviews ? null : product.reviewsCount > 0 ? (
+                  <>
+                    <div className="flex text-amber-500 text-sm">★★★★★</div>
+                    <span className="text-xs font-semibold text-black">{product.rating}</span>
+                    <span className="text-xs text-black/40">({product.reviewsCount} verified reviews)</span>
+                  </>
+                ) : (
+                  <span className="text-xs text-black/40">No reviews yet</span>
+                )}
               </div>
               <div className="text-right">
                 <p className="text-xs text-black/40 font-medium">Regular Price</p>
@@ -2071,25 +2189,28 @@ function ProductDetailPage({
             <p className="text-sm text-black/70 leading-relaxed mb-6">{product.desc}</p>
 
             {/* Size Selector */}
+            {availableSizes.length > 0 && (
             <div className="mb-6">
               <div className="flex items-center justify-between mb-2.5">
                 <label className="block text-xs font-bold tracking-widest uppercase text-black">
-                  Size: <span className="text-black/60 font-normal">{selectedSize}</span>
+                  {isTemplate ? 'Option' : 'Size'}: <span className="text-black/60 font-normal">{selectedSize}</span>
                 </label>
-                <button
-                  onClick={() => setShowSizeGuide(true)}
-                  className="text-xs font-medium text-black/60 hover:text-black underline underline-offset-2 cursor-pointer"
-                >
-                  Size Guide & Measurements
-                </button>
+                {!isTemplate && (
+                  <button
+                    onClick={() => setShowSizeGuide(true)}
+                    className="text-xs font-medium text-black/60 hover:text-black underline underline-offset-2 cursor-pointer"
+                  >
+                    Size Guide & Measurements
+                  </button>
+                )}
               </div>
 
-              <div className="grid grid-cols-6 gap-2">
+              <div className={isTemplate ? 'flex flex-wrap gap-2' : 'grid grid-cols-6 gap-2'}>
                 {availableSizes.map((s) => (
                   <button
                     key={s}
                     onClick={() => setSelectedSize(s)}
-                    className={`py-2.5 text-xs font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                    className={`py-2.5 ${isTemplate ? 'px-4' : ''} text-xs font-bold uppercase tracking-wider border transition-all cursor-pointer ${
                       selectedSize === s
                         ? 'border-black bg-black text-white'
                         : 'border-black/20 bg-white text-black hover:border-black'
@@ -2104,14 +2225,16 @@ function ProductDetailPage({
                 <p className="text-xs font-bold text-red-600 mt-2 flex items-center gap-1">
                   <span>⛔ Size {selectedSize} is currently Sold Out</span>
                 </p>
-              ) : (
+              ) : !isTemplate ? (
                 <p className="text-[11px] text-amber-700 font-medium mt-2">
                   ⚡ Stock Alert: Only 3 items left in size {selectedSize}!
                 </p>
-              )}
+              ) : null}
             </div>
+            )}
 
-            {/* --- ADD-ON CUSTOMIZATIONS --- */}
+            {/* --- ADD-ON CUSTOMIZATIONS (Lunar demo stores only) --- */}
+            {!isTemplate && (<>
             <div className="mb-5 bg-stone-50 border border-black/10 p-3.5 rounded-sm">
               <label className="block text-xs font-bold tracking-widest uppercase text-black mb-2 flex items-center justify-between">
                 <span>Lining (Add on)</span>
@@ -2210,6 +2333,7 @@ function ProductDetailPage({
                 })}
               </div>
             </div>
+            </>)}
 
             {/* Quantity Stepper & Add to Bag CTA */}
             <div className="flex items-center gap-4 mb-6">
@@ -2242,29 +2366,31 @@ function ProductDetailPage({
                   ? `SOLD OUT — ₹${totalPrice.toLocaleString()}`
                   : addedToast
                   ? '✓ ADDED TO BAG!'
-                  : `ADD TO BAG — ₹${totalPrice.toLocaleString()}`}
+                  : `${copy.pdpAddToBagText} — ₹${totalPrice.toLocaleString()}`}
               </button>
             </div>
 
             {/* Guarantee Callout */}
-            <div className="bg-[#F5F4F1] border border-black/10 p-4 mb-8 flex items-start gap-3 text-xs text-black/80">
-              <span className="text-lg">🛡️</span>
-              <div>
-                <p className="font-bold uppercase tracking-wider text-black">30-Day Sweat & Fit Guarantee</p>
-                <p className="text-black/60 mt-0.5">
-                  100% soft breathable cotton fabric. If you aren't completely thrilled, return within 30 days for a full refund.
-                </p>
+            {showGuarantee && (
+              <div className="bg-[#F5F4F1] border border-black/10 p-4 mb-8 flex items-start gap-3 text-xs text-black/80">
+                <span className="text-lg">🛡️</span>
+                <div>
+                  <p className="font-bold uppercase tracking-wider text-black">{copy.pdpGuaranteeTitle}</p>
+                  <p className="text-black/60 mt-0.5">{copy.pdpGuaranteeBody}</p>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Expandable Accordions */}
+            {(showDetails || showShipping) && (
             <div className="border-t border-black/10 divide-y divide-black/10 text-xs">
+              {showDetails && (<>
               <div>
                 <button
                   onClick={() => setOpenAccordion(openAccordion === 'fabric' ? null : 'fabric')}
                   className="w-full py-4 flex items-center justify-between font-bold uppercase tracking-wider text-left text-black cursor-pointer"
                 >
-                  <span>FABRICATION & TECHNICAL DETAILS</span>
+                  <span>{copy.pdpDetailsTitle}</span>
                   <span>{openAccordion === 'fabric' ? '−' : '+'}</span>
                 </button>
                 {openAccordion === 'fabric' && (
@@ -2284,47 +2410,57 @@ function ProductDetailPage({
                   onClick={() => setOpenAccordion(openAccordion === 'fit' ? null : 'fit')}
                   className="w-full py-4 flex items-center justify-between font-bold uppercase tracking-wider text-left text-black cursor-pointer"
                 >
-                  <span>FIT & SCULPT LEVEL</span>
+                  <span>{copy.pdpFitTitle}</span>
                   <span>{openAccordion === 'fit' ? '−' : '+'}</span>
                 </button>
                 {openAccordion === 'fit' && (
                   <div className="pb-4 text-black/70 leading-relaxed animate-slide-down">
-                    <p className="font-semibold text-black mb-1">Sculpt Rating: {product.sculptLevel}</p>
+                    {product.sculptLevel && (
+                      <p className="font-semibold text-black mb-1">{isTemplate ? product.sculptLevel : `Sculpt Rating: ${product.sculptLevel}`}</p>
+                    )}
                     <p>{product.fitInfo}</p>
                   </div>
                 )}
               </div>
+              </>)}
 
+              {showShipping && (
               <div>
                 <button
                   onClick={() => setOpenAccordion(openAccordion === 'shipping' ? null : 'shipping')}
                   className="w-full py-4 flex items-center justify-between font-bold uppercase tracking-wider text-left text-black cursor-pointer"
                 >
-                  <span>SHIPPING & RETURNS</span>
+                  <span>{copy.pdpShippingTitle}</span>
                   <span>{openAccordion === 'shipping' ? '−' : '+'}</span>
                 </button>
                 {openAccordion === 'shipping' && (
                   <div className="pb-4 text-black/70 leading-relaxed space-y-1 animate-slide-down">
-                    <p>• Free Express Delivery across India on orders over ₹999</p>
-                    <p>• Cash on Delivery & Instant UPI Available at checkout</p>
-                    <p>• Easy 30-Day returns & exchange policy</p>
+                    {copy.pdpShippingPoints.map((point, i) => (
+                      <p key={i}>• {point}</p>
+                    ))}
                   </div>
                 )}
               </div>
+              )}
             </div>
+            )}
           </div>
         </div>
 
         {/* Customer Reviews Section */}
-        <CustomerReviewsSection
-          productId={product.id}
-          reviews={reviews}
-          onAddReviewClick={() => setShowWriteReview(true)}
-        />
+        {showReviews && (
+          <CustomerReviewsSection
+            productId={product.id}
+            reviews={reviews}
+            isTemplate={isTemplate}
+            onAddReviewClick={() => setShowWriteReview(true)}
+          />
+        )}
 
         {/* Complete the look recommendation carousel */}
+        {showRelated && products.some((p) => p.id !== product.id) && (
         <div className="border-t border-black/10 pt-16 mb-16">
-          <h2 className="text-3xl font-normal font-serif text-black mb-8">Complete The Look</h2>
+          <h2 className="text-3xl font-normal font-serif text-black mb-8">{copy.pdpRelatedTitle}</h2>
           <div className="flex gap-6 overflow-x-auto scroll-hide pb-4">
             {products.filter((p) => p.id !== product.id).map((p) => (
               <ProductCard
@@ -2337,6 +2473,7 @@ function ProductDetailPage({
             ))}
           </div>
         </div>
+        )}
       </div>
 
       {/* Sizing Guide Modal */}
@@ -2349,7 +2486,7 @@ function ProductDetailPage({
             >
               ✕
             </button>
-            <h3 className="text-2xl font-serif text-black mb-2">{tenant?.name || 'The Lunar Clothing'} Size & Fit Guide</h3>
+            <h3 className="text-2xl font-serif text-black mb-2">{tenant?.brandName || tenant?.name || 'The Lunar Clothing'} Size & Fit Guide</h3>
             <p className="text-xs text-black/60 mb-6">Measurements in inches. All cotton maxis feature attached side waist tie-up ropes for an adjustable flared fit.</p>
 
             <table className="w-full text-xs text-left border-collapse mb-6">
@@ -2383,6 +2520,8 @@ function ProductDetailPage({
 
       {/* Write Review Modal */}
       <WriteReviewModal
+        key={showWriteReview ? 'review-open' : 'review-closed'}
+        prompt={copy.reviewPrompt}
         isOpen={showWriteReview}
         onClose={() => setShowWriteReview(false)}
         onSaveReview={onSaveReview}
@@ -2391,43 +2530,67 @@ function ProductDetailPage({
   )
 }
 
+function getPromoConfig(tenant?: TenantConfig) {
+  const isTemplate = isTemplateStore(tenant)
+  const promo = (tenant?.theme?.discountCode || (isTemplate ? `${(tenant?.slug || 'STORE').toUpperCase()}10` : 'LUNAR15')).toUpperCase()
+  const promoPercent = tenant?.theme?.discountPercent || (isTemplate ? 10 : 15)
+  const acceptedCodes = isTemplate ? [promo] : [promo, 'FIRST15']
+  return { promo, promoPercent, acceptedCodes }
+}
+
+function getDiscountAmount(tenant: TenantConfig | undefined, appliedPromo: string | null, rawSubtotal: number) {
+  const { promo, promoPercent } = getPromoConfig(tenant)
+  return appliedPromo === promo ? Math.round(rawSubtotal * (promoPercent / 100)) : 0
+}
+
 // 14. SLIDE-OVER CART DRAWER
 function CartDrawer({
+  tenant,
   isOpen,
   onClose,
   cart,
+  appliedPromo,
+  onApplyPromo,
   onUpdateQuantity,
   onRemoveItem,
   onStartCheckout,
 }: {
+  tenant?: TenantConfig
   isOpen: boolean
   onClose: () => void
   cart: CartItem[]
+  appliedPromo: string | null
+  onApplyPromo: (code: string | null) => void
   onUpdateQuantity: (index: number, delta: number) => void
   onRemoveItem: (index: number) => void
   onStartCheckout: () => void
 }) {
   const [promoCode, setPromoCode] = useState('')
-  const [appliedPromo, setAppliedPromo] = useState<string | null>(null)
   const [promoError, setPromoError] = useState('')
 
   if (!isOpen) return null
 
+  const copy = getStorefrontCopy(tenant)
+  const isTemplate = isTemplateStore(tenant)
+  const { promo, promoPercent, acceptedCodes } = getPromoConfig(tenant)
+  const setAppliedPromo = onApplyPromo
+
   const rawSubtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0)
-  const discountAmount = appliedPromo === 'LUNAR15' ? Math.round(rawSubtotal * 0.15) : 0
+  const discountAmount = getDiscountAmount(tenant, appliedPromo, rawSubtotal)
   const subtotal = rawSubtotal - discountAmount
 
-  const freeShippingThreshold = 999
-  const remainingForFreeShipping = Math.max(0, freeShippingThreshold - subtotal)
-  const freeShippingPercent = Math.min(100, (subtotal / freeShippingThreshold) * 100)
+  const shipping = getShippingConfig(tenant)
+  const freeShippingThreshold = shipping.threshold
+  const remainingForFreeShipping = shipping.costFor(subtotal) === 0 ? 0 : Math.max(0, freeShippingThreshold - subtotal)
+  const freeShippingPercent = remainingForFreeShipping === 0 ? 100 : Math.min(100, (subtotal / freeShippingThreshold) * 100)
 
   const handleApplyPromo = (e: React.FormEvent) => {
     e.preventDefault()
-    if (promoCode.trim().toUpperCase() === 'LUNAR15' || promoCode.trim().toUpperCase() === 'FIRST15') {
-      setAppliedPromo('LUNAR15')
+    if (acceptedCodes.includes(promoCode.trim().toUpperCase())) {
+      setAppliedPromo(promo)
       setPromoError('')
     } else {
-      setPromoError('Invalid code. Use LUNAR15 for 15% off!')
+      setPromoError(`Invalid code. Use ${promo} for ${promoPercent}% off!`)
     }
   }
 
@@ -2467,7 +2630,7 @@ function CartDrawer({
               <div className="h-full flex flex-col items-center justify-center text-center text-black/50 py-12">
                 <span className="text-4xl mb-3">🛍️</span>
                 <p className="text-lg font-serif text-black mb-1">Your bag is empty</p>
-                <p className="text-xs mb-6 max-w-xs">Explore our handcrafted Cotton Maxis and Mul Chanderi dresses.</p>
+                <p className="text-xs mb-6 max-w-xs">{copy.emptyBagHint}</p>
                 <button
                   onClick={onClose}
                   className="bg-black text-white font-bold text-xs tracking-widest uppercase px-6 py-3 cursor-pointer"
@@ -2492,20 +2655,26 @@ function CartDrawer({
 
                       {/* Add-on custom tags display */}
                       <div className="flex flex-wrap gap-1 mt-1.5">
-                        <span className="bg-stone-100 border border-black/10 text-[10px] font-medium px-1.5 py-0.5 text-black">
-                          Size: {item.selectedSize}
-                        </span>
-                        <span className="bg-stone-100 border border-black/10 text-[10px] font-medium px-1.5 py-0.5 text-black">
-                          {item.selectedLining}
-                        </span>
-                        {item.selectedZip !== 'None' && (
+                        {item.selectedSize && (
+                          <span className="bg-stone-100 border border-black/10 text-[10px] font-medium px-1.5 py-0.5 text-black">
+                            {isTemplate ? item.selectedSize : `Size: ${item.selectedSize}`}
+                          </span>
+                        )}
+                        {item.selectedLining && (
+                          <span className="bg-stone-100 border border-black/10 text-[10px] font-medium px-1.5 py-0.5 text-black">
+                            {item.selectedLining}
+                          </span>
+                        )}
+                        {item.selectedZip && item.selectedZip !== 'None' && (
                           <span className="bg-stone-100 border border-black/10 text-[10px] font-medium px-1.5 py-0.5 text-black">
                             {item.selectedZip}
                           </span>
                         )}
-                        <span className="bg-stone-100 border border-black/10 text-[10px] font-medium px-1.5 py-0.5 text-black">
-                          {item.selectedLength}
-                        </span>
+                        {item.selectedLength && (
+                          <span className="bg-stone-100 border border-black/10 text-[10px] font-medium px-1.5 py-0.5 text-black">
+                            {item.selectedLength}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -2546,7 +2715,7 @@ function CartDrawer({
                   type="text"
                   value={promoCode}
                   onChange={(e) => setPromoCode(e.target.value)}
-                  placeholder="PROMO CODE (e.g. LUNAR15)"
+                  placeholder={`PROMO CODE (e.g. ${promo})`}
                   className="flex-1 border border-black/20 bg-white px-3 py-2 text-xs uppercase tracking-wider outline-none focus:border-black"
                 />
                 <button
@@ -2559,7 +2728,7 @@ function CartDrawer({
 
               {appliedPromo && (
                 <p className="text-xs font-bold text-emerald-700 flex items-center justify-between">
-                  <span>✓ Code LUNAR15 Applied (15% Off)</span>
+                  <span>✓ Code {promo} Applied ({promoPercent}% Off)</span>
                   <span>-₹{discountAmount.toLocaleString()}</span>
                 </p>
               )}
@@ -2588,6 +2757,7 @@ function CartDrawer({
 
 // 15. CHECKOUT MULTI-STEP MODAL
 function CheckoutModal({
+  tenant,
   isOpen,
   onClose,
   cart,
@@ -2597,33 +2767,37 @@ function CheckoutModal({
   onOrderPlaced,
   onOpenAccount,
   onCompleteOrder,
+  discountCode,
 }: {
+  tenant?: TenantConfig
   isOpen: boolean
   onClose: () => void
   cart: CartItem[]
   subtotal: number
   discountAmount: number
   user: UserAccount | null
-  onOrderPlaced: (order: TrackedOrder) => void
+  onOrderPlaced: (order: TrackedOrder, customerEmail?: string) => void
   onOpenAccount: () => void
   onCompleteOrder: () => void
+  discountCode?: string | null
 }) {
   const [step, setStep] = useState<'shipping' | 'payment' | 'success'>('shipping')
+  const demoPrefill = !isTemplateStore(tenant)
   const [formData, setFormData] = useState({
-    name: user?.name || 'Priya Sharma',
-    email: user?.email || 'priya.sharma@example.com',
-    phone: user?.phone || '+91 98765 43210',
-    address: 'Flat 402, Sunshine Heights, Jubilee Hills',
-    city: 'Hyderabad',
-    state: 'Telangana',
-    pincode: '500033',
+    name: user?.name || (demoPrefill ? 'Priya Sharma' : ''),
+    email: user?.email || (demoPrefill ? 'priya.sharma@example.com' : ''),
+    phone: user?.phone || (demoPrefill ? '+91 98765 43210' : ''),
+    address: demoPrefill ? 'Flat 402, Sunshine Heights, Jubilee Hills' : '',
+    city: demoPrefill ? 'Hyderabad' : '',
+    state: demoPrefill ? 'Telangana' : '',
+    pincode: demoPrefill ? '500033' : '',
     paymentMethod: 'upi',
   })
   const [orderId, setOrderId] = useState('')
 
   if (!isOpen) return null
 
-  const shippingCost = subtotal >= 999 ? 0 : 70
+  const shippingCost = getShippingConfig(tenant).costFor(subtotal)
   const finalTotal = subtotal + shippingCost
 
   const handleShippingSubmit = (e: React.FormEvent) => {
@@ -2631,12 +2805,43 @@ function CheckoutModal({
     setStep('payment')
   }
 
-  const handlePlaceOrder = () => {
-    const generatedId = 'LUNAR-' + Math.floor(100000 + Math.random() * 900000)
+  const copy = getStorefrontCopy(tenant)
+  const brandName = tenant?.brandName || tenant?.name || 'The Lunar Clothing'
+
+  const handlePlaceOrder = async () => {
+    const orderPrefix = isTemplateStore(tenant) ? (tenant?.slug || 'ORDER').toUpperCase().slice(0, 8) : 'LUNAR'
+    const generatedId = `${orderPrefix}-` + Math.floor(100000 + Math.random() * 900000)
     const awbCode = 'BD' + Math.floor(100000000 + Math.random() * 900000000) + 'IN'
+    const paymentMethod =
+      formData.paymentMethod === 'cod' ? 'COD' : formData.paymentMethod === 'card' ? 'Card' : 'UPI'
+    let confirmedId = generatedId
+    if (tenant?.slug) {
+      const remote = await submitStorefrontOrder(tenant.slug, {
+        items: cart.map((i) => ({
+          productId: i.product.id,
+          quantity: i.quantity,
+          size: i.selectedSize,
+          lining: i.selectedLining,
+          zip: i.selectedZip,
+          length: i.selectedLength,
+        })),
+        shippingAddress: {
+          name: formData.name,
+          phone: formData.phone,
+          address: formData.address,
+          city: formData.city,
+          state: formData.state,
+          pincode: formData.pincode,
+        },
+        customerEmail: formData.email,
+        paymentMethod,
+        discountCode: discountCode || undefined,
+      })
+      if (remote?.id) confirmedId = remote.id
+    }
     const newTrackedOrder: TrackedOrder = {
-      id: generatedId,
-      date: 'Just now',
+      id: confirmedId,
+      date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       status: 'Processing',
       courier: 'Blue Dart Express',
       awb: awbCode,
@@ -2644,12 +2849,7 @@ function CheckoutModal({
       subtotal,
       shipping: shippingCost,
       total: finalTotal,
-      paymentMethod:
-        formData.paymentMethod === 'upi'
-          ? 'Instant UPI (GPay)'
-          : formData.paymentMethod === 'cod'
-          ? 'Cash on Delivery (COD)'
-          : 'Credit / Debit Card',
+      paymentMethod,
       shippingAddress: {
         name: formData.name,
         phone: formData.phone,
@@ -2672,14 +2872,14 @@ function CheckoutModal({
         {
           title: 'Order Confirmed & Payment Verified',
           time: 'Just now',
-          desc: 'Order received and logged in The Lunar Clothing fulfillment studio.',
+          desc: `Order received and logged by the ${brandName} fulfillment team.`,
           completed: true,
           current: true,
         },
         {
-          title: 'Garment Tailoring & Quality Inspection',
+          title: copy.orderStepTitle,
           time: 'Pending Next Step',
-          desc: 'Pieces prepared according to chosen length, lining, and zipper specifications.',
+          desc: copy.orderStepDesc,
           completed: false,
         },
         {
@@ -2697,8 +2897,8 @@ function CheckoutModal({
       ],
     }
 
-    setOrderId(generatedId)
-    onOrderPlaced(newTrackedOrder)
+    setOrderId(confirmedId)
+    onOrderPlaced(newTrackedOrder, formData.email)
     setStep('success')
   }
 
@@ -2708,7 +2908,7 @@ function CheckoutModal({
         <div className="bg-black text-white p-6 flex items-center justify-between">
           <div>
             <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">SECURE CHECKOUT</p>
-            <h2 className="text-xl font-serif">THE LUNAR CLOTHING</h2>
+            <h2 className="text-xl font-serif uppercase">{brandName}</h2>
           </div>
           {step !== 'success' && (
             <button onClick={onClose} className="text-white/70 hover:text-white text-xl cursor-pointer">
@@ -2816,7 +3016,10 @@ function CheckoutModal({
               <div className="bg-stone-50 border border-black/10 p-4 mt-4 flex items-center justify-between">
                 <div>
                   <p className="font-bold text-black uppercase">Order Total</p>
-                  <p className="text-black/50 text-[11px]">Free Express Delivery In India</p>
+                  <p className="text-black/50 text-[11px]">
+                    {discountAmount > 0 && `Includes ₹${discountAmount.toLocaleString()} discount • `}
+                    {shippingCost === 0 ? 'Free Express Delivery In India' : `Shipping ₹${shippingCost}`}
+                  </p>
                 </div>
                 <p className="text-lg font-bold text-black">₹{finalTotal.toLocaleString()}</p>
               </div>
@@ -2937,13 +3140,27 @@ function CheckoutModal({
                   <p className="font-bold uppercase text-black/60 mb-2">Itemized Summary:</p>
                   {cart.map((item, idx) => (
                     <div key={idx} className="flex justify-between py-1 border-b border-black/5 text-[11px]">
-                      <span>{item.quantity}x {item.product.name} (Size: {item.selectedSize}, {item.selectedLining}, {item.selectedZip}, {item.selectedLength})</span>
+                      <span>
+                        {item.quantity}x {item.product.name}
+                        {[item.selectedSize, item.selectedLining, item.selectedZip, item.selectedLength].some(Boolean) &&
+                          ` (${[item.selectedSize && (isTemplateStore(tenant) ? item.selectedSize : `Size: ${item.selectedSize}`), item.selectedLining, item.selectedZip, item.selectedLength].filter(Boolean).join(', ')})`}
+                      </span>
                       <span className="font-bold">₹{(item.product.price * item.quantity).toLocaleString()}</span>
                     </div>
                   ))}
                 </div>
+                {discountAmount > 0 && (
+                  <div className="flex justify-between text-xs text-emerald-700">
+                    <span>Discount</span>
+                    <span>-₹{discountAmount.toLocaleString()}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-xs text-black/60">
+                  <span>Shipping</span>
+                  <span>{shippingCost === 0 ? 'Free' : `₹${shippingCost}`}</span>
+                </div>
                 <div className="flex justify-between pt-2 text-sm font-bold text-black">
-                  <span>Grand Total Paid</span>
+                  <span>{formData.paymentMethod === 'cod' ? 'Total Payable on Delivery' : 'Grand Total Paid'}</span>
                   <span>₹{finalTotal.toLocaleString()}</span>
                 </div>
               </div>
@@ -2997,9 +3214,13 @@ function AuthModal({
   // Tab state: customer sign in, customer register, store owner login, or password reset
   const [tab, setTab] = useState<'signin' | 'signup' | 'seller' | 'seller-forgot' | 'seller-forgot-sent'>('signin')
   
+  const isTemplate = isTemplateStore(tenant)
+  const tenantKey = tenant?.id || 'tenant_lunar'
+
   // Shopper sign in state
-  const [signInEmail, setSignInEmail] = useState('priya.sharma@example.com')
-  const [signInPassword, setSignInPassword] = useState('lunar123')
+  const [signInEmail, setSignInEmail] = useState(isTemplate ? '' : DEMO_SHOPPER.email)
+  const [signInPassword, setSignInPassword] = useState(isTemplate ? '' : DEMO_SHOPPER.password)
+  const [signInLoading, setSignInLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [signInError, setSignInError] = useState('')
 
@@ -3015,20 +3236,20 @@ function AuthModal({
   const [resendTimer, setResendTimer] = useState(30)
 
   // Store Owner / Merchant state
-  const brandName = tenant?.name || 'The Lunar Clothing'
+  const brandName = tenant?.brandName || tenant?.name || 'The Lunar Clothing'
   const currentSlug = tenant?.slug || 'lunar'
   const matchedSeller = DEFAULT_DEMO_SELLER_CREDENTIALS.find(
     (c) => c.tenantSlug.toLowerCase() === currentSlug.toLowerCase()
-  ) || DEFAULT_DEMO_SELLER_CREDENTIALS[0]
+  )
 
-  const [sellerLoginId, setSellerLoginId] = useState(matchedSeller.loginId)
-  const [sellerPassword, setSellerPassword] = useState(matchedSeller.password)
+  const [sellerLoginId, setSellerLoginId] = useState(matchedSeller?.loginId || '')
+  const [sellerPassword, setSellerPassword] = useState(matchedSeller?.password || '')
   const [sellerShowPassword, setSellerShowPassword] = useState(false)
   const [sellerError, setSellerError] = useState('')
   const [sellerLoading, setSellerLoading] = useState(false)
 
   // Store Owner Forgot Password State
-  const [sellerForgotEmail, setSellerForgotEmail] = useState(matchedSeller.loginId)
+  const [sellerForgotEmail, setSellerForgotEmail] = useState(matchedSeller?.loginId || '')
   const [sellerForgotLoading, setSellerForgotLoading] = useState(false)
   const [sellerForgotError, setSellerForgotError] = useState<string | null>(null)
   const [sellerForgotResetToken, setSellerForgotResetToken] = useState<string | null>(null)
@@ -3043,17 +3264,15 @@ function AuthModal({
 
   // Sync default seller credentials if tenant changes
   useEffect(() => {
-    if (matchedSeller) {
-      setSellerLoginId(matchedSeller.loginId)
-      setSellerPassword(matchedSeller.password)
-      setSellerForgotEmail(matchedSeller.loginId)
-    }
+    setSellerLoginId(matchedSeller?.loginId || '')
+    setSellerPassword(matchedSeller?.password || '')
+    setSellerForgotEmail(matchedSeller?.loginId || '')
   }, [matchedSeller])
 
   if (!isOpen) return null
 
   // Shopper login handler
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!signInEmail || !signInPassword) {
       setSignInError('Please provide both email and password.')
@@ -3073,24 +3292,31 @@ function AuthModal({
       return
     }
 
-    const user: UserAccount = {
-      name: signInEmail.includes('priya') ? 'Priya Sharma' : signInEmail.split('@')[0].toUpperCase(),
-      email: signInEmail,
-      phone: '+91 98765 43210',
-      verified: true,
+    setSignInLoading(true)
+    setSignInError('')
+    const user = await shopperAccounts.signIn(tenantKey, signInEmail, signInPassword, !isTemplate)
+    setSignInLoading(false)
+    if (!user) {
+      setSignInError(
+        shopperAccounts.emailExists(tenantKey, signInEmail, !isTemplate)
+          ? 'Incorrect password. Please try again.'
+          : 'No account found with this email. Create an account to continue.'
+      )
+      return
     }
     onLoginSuccess(user, false)
     onClose()
   }
 
   const handleFillDemo = () => {
-    setSignInEmail('priya.sharma@example.com')
-    setSignInPassword('lunar123')
+    setSignInEmail(DEMO_SHOPPER.email)
+    setSignInPassword(DEMO_SHOPPER.password)
     setSignInError('')
   }
 
   // Store owner quick fill
   const handleFillSellerDemo = () => {
+    if (!matchedSeller) return
     setSellerLoginId(matchedSeller.loginId)
     setSellerPassword(matchedSeller.password)
     setSellerError('')
@@ -3134,7 +3360,7 @@ function AuthModal({
     e.preventDefault()
     setSellerForgotError(null)
     setSellerForgotLoading(true)
-    const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    const API_BASE = import.meta.env.VITE_API_URL || ''
     try {
       const res = await fetch(`${API_BASE}/api/auth/seller/forgot-password`, {
         method: 'POST',
@@ -3145,13 +3371,11 @@ function AuthModal({
       if (!res.ok) {
         setSellerForgotError(data.error || 'Failed to send reset email.')
       } else {
-        setSellerForgotResetToken(data.resetToken || null)
+        setSellerForgotResetToken(null)
         setTab('seller-forgot-sent')
       }
     } catch {
-      // Local demo simulation fallback
-      setSellerForgotResetToken('rst-demo-' + Math.floor(100000 + Math.random() * 900000))
-      setTab('seller-forgot-sent')
+      setSellerForgotError('Could not reach the server. Please try again in a moment.')
     } finally {
       setSellerForgotLoading(false)
     }
@@ -3164,6 +3388,14 @@ function AuthModal({
       setOtpError('Please fill out all mandatory fields.')
       return
     }
+    if (signUpPassword.length < 6) {
+      setOtpError('Password must be at least 6 characters.')
+      return
+    }
+    if (shopperAccounts.emailExists(tenantKey, signUpEmail, !isTemplate)) {
+      setOtpError('An account with this email already exists. Please sign in instead.')
+      return
+    }
     const randomOtp = Math.floor(100000 + Math.random() * 900000).toString()
     setGeneratedOtp(randomOtp)
     setSignUpStep('otp')
@@ -3171,20 +3403,23 @@ function AuthModal({
     setOtpError('')
   }
 
-  const handleVerifyOtpAndRegister = (e: React.FormEvent) => {
+  const handleVerifyOtpAndRegister = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (otpCode.trim() !== generatedOtp && otpCode.trim() !== '849201') {
+    if (otpCode.trim() !== generatedOtp) {
       setOtpError('Invalid verification code. Please check and try again.')
       return
     }
 
-    const newUser: UserAccount = {
-      name: signUpName,
-      email: signUpEmail,
-      phone: signUpPhone || '+91 98765 00000',
-      verified: true,
+    const res = await shopperAccounts.register(
+      tenantKey,
+      { name: signUpName, email: signUpEmail, phone: signUpPhone, password: signUpPassword },
+      !isTemplate
+    )
+    if (!res.user) {
+      setOtpError(res.error || 'Could not create your account. Please try again.')
+      return
     }
-    onLoginSuccess(newUser, true)
+    onLoginSuccess(res.user, true)
     onClose()
   }
 
@@ -3264,16 +3499,18 @@ function AuthModal({
           {/* ── 1. CUSTOMER SIGN IN ─────────────────────────────── */}
           {tab === 'signin' && (
             <form onSubmit={handleSignIn} className="space-y-4 text-xs">
-              <div className="bg-amber-50 border border-amber-200 p-3 text-[11px] text-amber-900 rounded-xs flex items-center justify-between">
-                <span>⚡ Test with demo account to view existing orders:</span>
-                <button
-                  type="button"
-                  onClick={handleFillDemo}
-                  className="font-bold underline text-amber-950 hover:text-black cursor-pointer"
-                >
-                  Quick Fill
-                </button>
-              </div>
+              {!isTemplate && (
+                <div className="bg-amber-50 border border-amber-200 p-3 text-[11px] text-amber-900 rounded-xs flex items-center justify-between">
+                  <span>⚡ Test with demo account to view existing orders:</span>
+                  <button
+                    type="button"
+                    onClick={handleFillDemo}
+                    className="font-bold underline text-amber-950 hover:text-black cursor-pointer"
+                  >
+                    Quick Fill
+                  </button>
+                </div>
+              )}
 
               <div>
                 <label className="block text-black/60 font-semibold mb-1">Email Address *</label>
@@ -3282,7 +3519,7 @@ function AuthModal({
                   required
                   value={signInEmail}
                   onChange={(e) => setSignInEmail(e.target.value)}
-                  placeholder="e.g. priya.sharma@example.com"
+                  placeholder="you@example.com"
                   className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
                 />
               </div>
@@ -3312,9 +3549,10 @@ function AuthModal({
 
               <button
                 type="submit"
-                className="w-full bg-black text-white font-bold text-xs tracking-[0.2em] uppercase py-3.5 mt-2 hover:bg-stone-800 transition-colors cursor-pointer shadow-md"
+                disabled={signInLoading}
+                className="w-full bg-black text-white font-bold text-xs tracking-[0.2em] uppercase py-3.5 mt-2 hover:bg-stone-800 transition-colors cursor-pointer shadow-md disabled:opacity-60"
               >
-                SIGN IN TO VIEW ORDERS →
+                {signInLoading ? 'SIGNING IN…' : 'SIGN IN TO VIEW ORDERS →'}
               </button>
 
               <div className="text-center pt-2 text-black/50">
@@ -3348,23 +3586,25 @@ function AuthModal({
           {/* ── 2. STORE OWNER / MERCHANT LOGIN ────────────────── */}
           {tab === 'seller' && (
             <form onSubmit={handleSellerSignIn} className="space-y-4 text-xs">
-              <div className="bg-blue-50 border border-blue-200 p-3 text-[11px] text-blue-950 rounded-xs flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-blue-950 flex items-center gap-1">
-                    <span>⚡</span> <span>Demo Store Owner Credentials:</span>
-                  </p>
-                  <p className="text-[10px] text-blue-700 font-mono mt-0.5 truncate max-w-[220px]">
-                    {matchedSeller.loginId}
-                  </p>
+              {matchedSeller && (
+                <div className="bg-blue-50 border border-blue-200 p-3 text-[11px] text-blue-950 rounded-xs flex items-center justify-between">
+                  <div>
+                    <p className="font-bold text-blue-950 flex items-center gap-1">
+                      <span>⚡</span> <span>Demo Store Owner Credentials:</span>
+                    </p>
+                    <p className="text-[10px] text-blue-700 font-mono mt-0.5 truncate max-w-[220px]">
+                      {matchedSeller.loginId}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleFillSellerDemo}
+                    className="font-bold underline text-blue-900 hover:text-black cursor-pointer text-xs"
+                  >
+                    Quick Fill
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleFillSellerDemo}
-                  className="font-bold underline text-blue-900 hover:text-black cursor-pointer text-xs"
-                >
-                  Quick Fill
-                </button>
-              </div>
+              )}
 
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">
@@ -3534,7 +3774,7 @@ function AuthModal({
                       required
                       value={signUpName}
                       onChange={(e) => setSignUpName(e.target.value)}
-                      placeholder="e.g. Priya Sharma"
+                      placeholder="Your full name"
                       className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
                     />
                   </div>
@@ -3546,7 +3786,7 @@ function AuthModal({
                       required
                       value={signUpEmail}
                       onChange={(e) => setSignUpEmail(e.target.value)}
-                      placeholder="e.g. priya.sharma@example.com"
+                      placeholder="you@example.com"
                       className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
                     />
                   </div>
@@ -3681,17 +3921,21 @@ function AuthModal({
 
 // 15c. ACCOUNT DRAWER (EXISTING ORDERS & LIVE REAL-TIME TRACKING)
 function AccountDrawer({
+  tenant,
   isOpen,
   onClose,
   user,
   orders,
+  lookupOrders = orders,
   onSignOut,
   onSelectProduct,
 }: {
+  tenant?: TenantConfig
   isOpen: boolean
   onClose: () => void
   user: UserAccount | null
   orders: TrackedOrder[]
+  lookupOrders?: TrackedOrder[]
   onSignOut: () => void
   onSelectProduct: (id: number) => void
 }) {
@@ -3705,6 +3949,11 @@ function AccountDrawer({
 
   if (!isOpen) return null
 
+  const brandName = tenant?.brandName || tenant?.name || 'The Lunar Clothing'
+  const trackingEnabled = tenant?.theme?.enableOrderTracking ?? true
+  const supportPhone = (tenant?.contact?.phone || tenant?.ownerPhone || '+919876543210').replace(/[^0-9]/g, '')
+  const exampleOrderId = orders[0]?.id || (isTemplateStore(tenant) ? `${(tenant?.slug || 'ORDER').toUpperCase().slice(0, 8)}-123456` : 'LUNAR-892410')
+
   const handleCopyAwb = (awb: string) => {
     navigator.clipboard.writeText(awb)
     setCopiedAwb(awb)
@@ -3715,9 +3964,15 @@ function AccountDrawer({
     e.preventDefault()
     setHasSearched(true)
     const cleaned = lookupQuery.trim().toUpperCase()
-    const found = orders.find(
-      (o) => o.id.toUpperCase() === cleaned || o.awb.toUpperCase() === cleaned || o.shippingAddress.phone.includes(cleaned)
-    )
+    const digits = cleaned.replace(/[^0-9]/g, '').slice(-10)
+    const found = cleaned
+      ? lookupOrders.find(
+          (o) =>
+            o.id.toUpperCase() === cleaned ||
+            o.awb.toUpperCase() === cleaned ||
+            (digits.length === 10 && o.shippingAddress.phone.replace(/[^0-9]/g, '').slice(-10) === digits)
+        )
+      : undefined
     setLookupResult(found || null)
   }
 
@@ -3729,7 +3984,15 @@ function AccountDrawer({
           {/* Header */}
           <div className="p-6 border-b border-black/10 bg-stone-950 text-white flex items-center justify-between">
             <div className="flex items-center gap-3.5">
-              <img src="/lunar-logo.png" alt="Lunar" className="h-9 w-auto object-contain rounded-md" />
+              {tenant?.logo || tenant?.theme?.logoUrl ? (
+                <img src={tenant.logo || tenant.theme.logoUrl} alt={brandName} className="h-9 w-auto object-contain rounded-md" />
+              ) : tenant && isTemplateStore(tenant) ? (
+                <div className="w-9 h-9 rounded-md bg-white/10 border border-white/20 flex items-center justify-center font-bold text-sm">
+                  {brandName.charAt(0).toUpperCase()}
+                </div>
+              ) : (
+                <img src="/lunar-logo.png" alt="Lunar" className="h-9 w-auto object-contain rounded-md" />
+              )}
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-serif tracking-wider uppercase">{user ? user.name : 'Customer Account'}</h2>
@@ -3770,6 +4033,7 @@ function AccountDrawer({
                 {orders.length}
               </span>
             </button>
+            {trackingEnabled && (
             <button
               onClick={() => setActiveTab('lookup')}
               className={`flex-1 py-3.5 text-center transition-colors cursor-pointer ${
@@ -3778,6 +4042,7 @@ function AccountDrawer({
             >
               🔍 Direct AWB Tracker
             </button>
+            )}
             <button
               onClick={() => setActiveTab('profile')}
               className={`flex-1 py-3.5 text-center transition-colors cursor-pointer ${
@@ -3801,6 +4066,23 @@ function AccountDrawer({
                     Live Courier Synchronization Active
                   </p>
                 </div>
+
+                {orders.length === 0 && (
+                  <div className="border border-dashed border-black/15 bg-stone-50 py-12 px-6 text-center">
+                    <p className="text-3xl mb-3">📦</p>
+                    <p className="text-lg font-serif text-black mb-1">No orders yet</p>
+                    <p className="text-xs text-black/55 mb-5">
+                      Orders you place with {user?.email || 'your account'} will appear here with live tracking.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="bg-black text-white font-bold text-xs tracking-widest uppercase px-6 py-3 cursor-pointer hover:bg-stone-800"
+                    >
+                      Start Shopping →
+                    </button>
+                  </div>
+                )}
 
                 {orders.map((order) => {
                   const isExpanded = expandedOrderId === order.id
@@ -3843,7 +4125,7 @@ function AccountDrawer({
 
                         <div className="flex items-center gap-3">
                           <span className="text-xs font-bold text-black uppercase tracking-wider">
-                            {isExpanded ? 'Hide Details ▲' : 'Track Order ▼'}
+                            {isExpanded ? 'Hide Details ▲' : trackingEnabled ? 'Track Order ▼' : 'View Details ▼'}
                           </span>
                         </div>
                       </div>
@@ -3851,6 +4133,7 @@ function AccountDrawer({
                       {/* Expanded Order Details & Tracking Stepper */}
                       {isExpanded && (
                         <div className="border-t border-black/10 p-5 space-y-6 bg-white animate-fade-in">
+                          {trackingEnabled && (<>
                           {/* Courier & ETA Pill */}
                           <div className="bg-stone-100 p-4 border border-black/10 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
                             <div>
@@ -3918,6 +4201,7 @@ function AccountDrawer({
                               })}
                             </div>
                           </div>
+                          </>)}
 
                           {/* Items Purchased in this order */}
                           <div className="border-t border-black/10 pt-4">
@@ -3936,7 +4220,7 @@ function AccountDrawer({
                                     <div>
                                       <p className="font-bold text-black">{item.name}</p>
                                       <div className="flex gap-2 flex-wrap text-[11px] text-black/60 mt-1">
-                                        <span className="bg-white border border-black/10 px-1.5 py-0.5">Size: {item.size}</span>
+                                        {item.size && <span className="bg-white border border-black/10 px-1.5 py-0.5">{isTemplateStore(tenant) ? item.size : `Size: ${item.size}`}</span>}
                                         {item.lining && <span className="bg-white border border-black/10 px-1.5 py-0.5">{item.lining}</span>}
                                         {item.zip && item.zip !== 'None' && (
                                           <span className="bg-white border border-black/10 px-1.5 py-0.5">{item.zip}</span>
@@ -3964,7 +4248,7 @@ function AccountDrawer({
                             </div>
 
                             <a
-                              href={`https://wa.me/919876543210?text=Hello%20The%20Lunar%20Clothing,%20I%20need%20assistance%20tracking%20my%20order%20${order.id}`}
+                              href={`https://wa.me/${supportPhone}?text=${encodeURIComponent(`Hello ${brandName}, I need assistance tracking my order ${order.id}`)}`}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex items-center gap-1.5 bg-emerald-700 text-white px-3.5 py-2 text-[11px] font-bold uppercase tracking-wider hover:bg-emerald-800 transition-colors cursor-pointer"
@@ -3980,12 +4264,12 @@ function AccountDrawer({
               </div>
             )}
 
-            {activeTab === 'lookup' && (
+            {trackingEnabled && activeTab === 'lookup' && (
               <div className="space-y-6">
                 <div className="bg-stone-50 border border-black/10 p-5">
                   <h3 className="text-sm font-bold uppercase tracking-wider text-black mb-1">Direct Courier & Order Lookup</h3>
                   <p className="text-xs text-black/60 mb-4">
-                    Enter any Order ID (e.g. <span className="font-mono font-bold text-black">LUNAR-892410</span>) or Courier AWB number to fetch instant live tracking records.
+                    Enter any Order ID (e.g. <span className="font-mono font-bold text-black">{exampleOrderId}</span>) or Courier AWB number to fetch instant live tracking records.
                   </p>
 
                   <form onSubmit={handleSearchOrder} className="flex gap-2">
@@ -3994,7 +4278,7 @@ function AccountDrawer({
                       required
                       value={lookupQuery}
                       onChange={(e) => setLookupQuery(e.target.value)}
-                      placeholder="e.g. LUNAR-892410 or BD8912401IN"
+                      placeholder={`e.g. ${exampleOrderId} or BD8912401IN`}
                       className="flex-1 border border-black/20 bg-white p-2.5 text-xs font-mono uppercase tracking-wider outline-none focus:border-black"
                     />
                     <button
@@ -4112,11 +4396,10 @@ function AboutModal({
 }) {
   if (!isOpen) return null
 
-  const brandName = tenant?.name || 'THE LUNAR CLOTHING'
-  const brandTagline = tenant?.tagline || 'Thoughtfully Handcrafted For Weightless Everyday Living.'
-  const aboutBio = tenant?.aboutStory || `${brandName} was born out of a desire for effortless silhouettes and bespoke artisanal craft. Each piece is crafted with utmost care, celebrating authentic Indian textile traditions, premium fabrics, and heirloom silhouettes that elevate everyday occasions and festive celebrations.`
-  const currencySymbol = tenant?.currencySymbol || '₹'
-  const freeThreshold = tenant?.contact?.shippingThresholdFormatted || `${currencySymbol}999`
+  const brandName = tenant?.brandName || tenant?.name || 'THE LUNAR CLOTHING'
+  const copy = getStorefrontCopy(tenant)
+  const brandTagline = tenant?.tagline || copy.aboutTagline
+  const aboutBio = tenant?.aboutStory || copy.aboutBio
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
@@ -4126,7 +4409,7 @@ function AboutModal({
             <BrandLogo tenant={tenant} className="h-9 w-auto" />
             <div>
               <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">{brandName}</p>
-              <h2 className="text-lg font-serif">About Our Studio & Craft</h2>
+              <h2 className="text-lg font-serif">{copy.aboutTitle}</h2>
             </div>
           </div>
           <button onClick={onClose} className="text-white/70 hover:text-white text-xl cursor-pointer">
@@ -4137,7 +4420,7 @@ function AboutModal({
         <div className="p-6 md:p-8 space-y-6 text-xs text-black/80 leading-relaxed">
           <div>
             <span className="text-[10px] font-mono font-bold tracking-[0.2em] uppercase text-amber-800 bg-amber-50 px-2 py-0.5 rounded-xs">
-              HERITAGE & COMFORT
+              {copy.aboutBadge}
             </span>
             <h3 className="text-2xl font-serif text-black mt-2 mb-3">
               {brandTagline}
@@ -4148,35 +4431,19 @@ function AboutModal({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-            <div className="border border-black/10 p-4 bg-stone-50">
-              <div className="text-xl mb-1">🌿</div>
-              <h4 className="font-bold text-black uppercase tracking-wider mb-1">Pure Artisanal Fabrics</h4>
-              <p className="text-[11px] text-black/60 leading-normal">
-                Airy, skin-friendly handloom & organic weaves pre-treated for pure comfort.
-              </p>
-            </div>
-
-            <div className="border border-black/10 p-4 bg-stone-50">
-              <div className="text-xl mb-1">👗</div>
-              <h4 className="font-bold text-black uppercase tracking-wider mb-1">Tailored Silhouettes</h4>
-              <p className="text-[11px] text-black/60 leading-normal">
-                Bespoke sizing, custom lengths, and functional utility side pockets.
-              </p>
-            </div>
-
-            <div className="border border-black/10 p-4 bg-stone-50">
-              <div className="text-xl mb-1">🎨</div>
-              <h4 className="font-bold text-black uppercase tracking-wider mb-1">Ethical Heritage</h4>
-              <p className="text-[11px] text-black/60 leading-normal">
-                Direct weaver partnerships sustaining generational Indian artisan clusters.
-              </p>
-            </div>
+            {copy.aboutPillars.map((pillar) => (
+              <div key={pillar.title} className="border border-black/10 p-4 bg-stone-50">
+                <div className="text-xl mb-1">{pillar.icon}</div>
+                <h4 className="font-bold text-black uppercase tracking-wider mb-1">{pillar.title}</h4>
+                <p className="text-[11px] text-black/60 leading-normal">{pillar.desc}</p>
+              </div>
+            ))}
           </div>
 
           <div className="bg-stone-900 text-white p-5 rounded-xs flex flex-col sm:flex-row items-center justify-between gap-4">
             <div>
               <p className="font-bold uppercase tracking-wider text-sm">Experience {brandName}</p>
-              <p className="text-white/60 text-[11px]">Free shipping across India on orders over {freeThreshold}.</p>
+              <p className="text-white/60 text-[11px]">{getShippingConfig(tenant).summary}.</p>
             </div>
             <button
               onClick={() => {
@@ -4200,30 +4467,43 @@ function ContactModal({
   onClose,
   onSuccessMessage,
   tenant,
+  user,
+  initialSubject,
 }: {
   isOpen: boolean
   onClose: () => void
   onSuccessMessage: (msg: string) => void
   tenant?: TenantConfig
+  user?: UserAccount | null
+  initialSubject?: string
 }) {
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
-  const [subject, setSubject] = useState('Order Tracking Inquiry')
+  const [name, setName] = useState(user?.name || '')
+  const [email, setEmail] = useState(user?.email || '')
+  const [phone, setPhone] = useState(user?.phone || '')
+  const [subject, setSubject] = useState(initialSubject || 'Order Tracking Inquiry')
   const [message, setMessage] = useState('')
   const [submitted, setSubmitted] = useState(false)
 
   if (!isOpen) return null
 
-  const brandName = tenant?.name || 'The Lunar Clothing'
-  const contactPhone = tenant?.contact?.phone || '+91 98765 43210'
-  const contactEmail = tenant?.contact?.email || 'care@thelunarclothing.com'
-  const contactAddress = tenant?.contact?.address || 'Studio: Jubilee Hills, Hyderabad & Jaipur'
+  const brandName = tenant?.brandName || tenant?.name || 'The Lunar Clothing'
+  const isTemplate = isTemplateStore(tenant)
+  const copy = getStorefrontCopy(tenant)
+  const contactPhone = tenant?.contact?.phone || (isTemplate ? tenant?.ownerPhone : '') || '+91 98765 43210'
+  const contactEmail = tenant?.contact?.email || (isTemplate ? tenant?.ownerEmail : '') || 'care@thelunarclothing.com'
+  const contactAddress = tenant?.contact?.address || (isTemplate ? 'India' : 'Studio: Jubilee Hills, Hyderabad & Jaipur')
   const workingHours = tenant?.contact?.workingHours || 'Mon–Sat: 10AM – 7PM IST'
   const cleanPhone = contactPhone.replace(/[^0-9]/g, '')
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    storeInbox.addMessage(tenant?.id || 'tenant_lunar', {
+      name: name.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      subject,
+      message: message.trim(),
+    })
     setSubmitted(true)
     onSuccessMessage(`Thank you! Your message has been sent to ${brandName} Customer Care.`)
     setTimeout(() => {
@@ -4299,7 +4579,7 @@ function ContactModal({
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Priya Sharma"
+                    placeholder="Your full name"
                     className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
                   />
                 </div>
@@ -4309,7 +4589,7 @@ function ContactModal({
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    placeholder={contactPhone}
+                    placeholder="+91 98765 43210"
                     className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
                   />
                 </div>
@@ -4322,7 +4602,7 @@ function ContactModal({
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="priya.sharma@example.com"
+                  placeholder="you@example.com"
                   className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs"
                 />
               </div>
@@ -4334,11 +4614,9 @@ function ContactModal({
                   onChange={(e) => setSubject(e.target.value)}
                   className="w-full border border-black/20 p-2.5 outline-none focus:border-black text-xs bg-white cursor-pointer"
                 >
-                  <option value="Order Tracking Inquiry">Order Tracking & Courier Delivery</option>
-                  <option value="Custom Tailoring / Sizing">Custom Length, Sizing or Fabric Details</option>
-                  <option value="Exchange or Return">Exchange & Returns Support</option>
-                  <option value="Wholesale or Collaboration">Artisan Collaboration / Bulk Orders</option>
-                  <option value="General Inquiry">General Inquiry</option>
+                  {copy.contactSubjects.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
                 </select>
               </div>
 
@@ -4390,11 +4668,13 @@ function SearchOverlay({
     (p) =>
       p.name.toLowerCase().includes(query.toLowerCase()) ||
       p.category.toLowerCase().includes(query.toLowerCase()) ||
+      getCategoryLabel(tenant, p.category).toLowerCase().includes(query.toLowerCase()) ||
       p.fabricTech.toLowerCase().includes(query.toLowerCase()) ||
       p.sculptLevel.toLowerCase().includes(query.toLowerCase())
   )
 
-  const brandName = tenant?.name || 'Our'
+  const brandName = tenant?.brandName || tenant?.name || 'Our'
+  const searchHint = getStorefrontCopy(tenant).searchHint
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm animate-fade-in flex flex-col items-center pt-20 px-6">
@@ -4404,7 +4684,7 @@ function SearchOverlay({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Search ${brandName} products, fabrics, collections...`}
+            placeholder={`Search ${brandName} ${searchHint}...`}
             className="w-full text-lg font-serif text-black outline-none bg-transparent placeholder-black/30"
             autoFocus
           />
@@ -4416,7 +4696,7 @@ function SearchOverlay({
         <div className="max-h-96 overflow-y-auto space-y-4">
           {query.trim() === '' ? (
             <p className="text-xs text-black/40 uppercase tracking-widest text-center py-6">
-              Type to search products, fabrics, or categories in {brandName}...
+              Type to search {searchHint} in {brandName}...
             </p>
           ) : results.length === 0 ? (
             <p className="text-xs text-black/50 text-center py-6">No products found matching "{query}"</p>
@@ -4433,7 +4713,7 @@ function SearchOverlay({
                 <img src={p.imgMain} alt={p.name} className="w-14 h-16 object-cover bg-stone-100" />
                 <div>
                   <h4 className="font-bold text-sm text-black">{p.name}</h4>
-                  <p className="text-xs text-black/50">{p.sculptLevel} · {p.priceFormatted}</p>
+                  <p className="text-xs text-black/50">{[p.sculptLevel, p.priceFormatted].filter(Boolean).join(' · ')}</p>
                 </div>
               </div>
             ))
@@ -4481,14 +4761,14 @@ function CatalogPage({
     return list
   }, [activeFilter, sortBy, products])
 
-  // Derive unique categories dynamically
-  const categories = useMemo(() => {
-    const rawCategories = Array.from(new Set(products.map((p) => p.category)))
-    return ['all', ...rawCategories]
-  }, [products])
+  const categories = useMemo(
+    () => [{ slug: 'all', name: 'ALL PRODUCTS' }, ...getStoreCategories(tenant, products)],
+    [tenant, products]
+  )
 
-  const brandName = tenant?.name || 'THE LUNAR CLOTHING'
-  const brandTagline = tenant?.tagline || 'Handcrafted Cotton Maxis & Ethnic Dresses'
+  const copy = getStorefrontCopy(tenant)
+  const brandName = tenant?.brandName || tenant?.name || 'THE LUNAR CLOTHING'
+  const brandTagline = tenant?.tagline || copy.catalogTagline
 
   return (
     <div className="py-12 bg-white min-h-screen">
@@ -4497,32 +4777,29 @@ function CatalogPage({
           <p className="text-xs font-bold tracking-[0.3em] uppercase text-black/40 mb-2">{brandName} COLLECTION</p>
           <h1 className="text-4xl md:text-5xl font-serif text-black mb-4">{brandTagline}</h1>
           <p className="text-sm text-black/60 leading-relaxed">
-            {tenant?.aboutStory || 'Discover handcrafted silhouettes, breathable pure fabrics, and timeless artisanal craft.'}
+            {tenant?.aboutStory || copy.catalogIntro}
           </p>
         </div>
 
         {/* Filter Tabs */}
         <div className="flex items-center justify-center gap-3 mb-8 flex-wrap text-xs font-bold tracking-widest uppercase">
-          {categories.map((cat) => {
-            const label = cat === 'all' ? 'ALL PRODUCTS' : cat.toUpperCase()
-            return (
-              <button
-                key={cat}
-                onClick={() => setActiveFilter(cat)}
-                className={`px-5 py-2.5 border transition-all cursor-pointer ${
-                  activeFilter === cat ? 'bg-black text-white border-black shadow-md' : 'bg-white text-black border-black/20 hover:border-black'
-                }`}
-              >
-                {label}
-              </button>
-            )
-          })}
+          {categories.map((cat) => (
+            <button
+              key={cat.slug}
+              onClick={() => setActiveFilter(cat.slug)}
+              className={`px-5 py-2.5 border transition-all cursor-pointer ${
+                activeFilter === cat.slug ? 'bg-black text-white border-black shadow-md' : 'bg-white text-black border-black/20 hover:border-black'
+              }`}
+            >
+              {cat.name.toUpperCase()}
+            </button>
+          ))}
         </div>
 
         {/* Sorting & Filter Header Bar */}
         <div className="flex items-center justify-between border-b border-black/10 pb-4 mb-8 text-xs font-semibold uppercase tracking-wider text-black/70">
           <div>
-            Showing <span className="font-bold text-black">{filteredProducts.length}</span> Products
+            Showing <span className="font-bold text-black">{filteredProducts.length}</span> {filteredProducts.length === 1 ? 'Product' : 'Products'}
           </div>
 
           <div className="flex items-center gap-2">
@@ -4539,6 +4816,18 @@ function CatalogPage({
             </select>
           </div>
         </div>
+
+        {filteredProducts.length === 0 && (
+          <div className="border border-dashed border-black/15 py-20 px-6 text-center">
+            <p className="text-3xl mb-3">🛍️</p>
+            <h3 className="text-2xl font-serif text-black mb-2">
+              {products.length === 0 ? copy.comingSoonTitle : 'Nothing here yet'}
+            </h3>
+            <p className="text-sm text-black/55 max-w-md mx-auto">
+              {products.length === 0 ? copy.comingSoonBody : 'New products for this category are on the way.'}
+            </p>
+          </div>
+        )}
 
         {/* Product Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
@@ -4557,32 +4846,195 @@ function CatalogPage({
   )
 }
 
+type StoreInfoTopic = 'shipping' | 'returns' | 'faq' | 'care' | 'size' | 'gifts'
+
+function StoreInfoModal({
+  tenant,
+  topic,
+  onClose,
+  onOpenContact,
+}: {
+  tenant?: TenantConfig
+  topic: StoreInfoTopic | null
+  onClose: () => void
+  onOpenContact: () => void
+}) {
+  if (!topic) return null
+  const brandName = tenant?.brandName || tenant?.name || 'The Lunar Clothing'
+  const isTemplate = isTemplateStore(tenant)
+  const shipping = getShippingConfig(tenant)
+  const symbol = tenant?.currencySymbol || '₹'
+  const returnWindow = isTemplate ? '7 days' : '30 days'
+  const supportEmail = tenant?.contact?.email || tenant?.ownerEmail || 'care@thelunarclothing.com'
+  const supportPhone = tenant?.contact?.phone || tenant?.ownerPhone || '+91 98765 43210'
+  const hours = tenant?.contact?.workingHours || 'Mon–Sat: 10AM – 7PM IST'
+  const shippingLine =
+    shipping.fee <= 0
+      ? 'Shipping is free on every order.'
+      : `Orders above ${symbol}${shipping.threshold.toLocaleString('en-IN')} ship free. Below that, a flat ${symbol}${shipping.fee} delivery fee applies.`
+
+  const content: Record<StoreInfoTopic, { title: string; items: { q: string; a: string }[] }> = {
+    shipping: {
+      title: 'Shipping & Delivery',
+      items: [
+        { q: 'Delivery charges', a: shippingLine },
+        { q: 'Delivery time', a: 'Orders are dispatched within 1–2 business days and usually arrive in 3–5 business days across India.' },
+        { q: 'Tracking', a: 'You will get a courier name and AWB number once your order ships. Track it any time from “My Account”.' },
+        { q: 'Cash on Delivery', a: 'COD is available on most pin codes, along with UPI, cards and net banking.' },
+      ],
+    },
+    returns: {
+      title: 'Returns & Exchanges',
+      items: [
+        { q: 'Return window', a: `You can request a return or exchange within ${returnWindow} of delivery.` },
+        { q: 'Condition', a: 'Items must be unused, with original tags and packaging.' },
+        { q: 'How to request', a: `Contact us with your order ID at ${supportEmail} or on WhatsApp at ${supportPhone}.` },
+        { q: 'Refunds', a: 'Refunds are issued to the original payment method within 5–7 business days after we receive the item. COD orders are refunded by bank transfer or UPI.' },
+      ],
+    },
+    faq: {
+      title: 'Frequently Asked Questions',
+      items: [
+        { q: 'How do I track my order?', a: 'Sign in and open “My Account”, or use the Direct AWB Tracker with your order ID.' },
+        { q: 'Which payment methods do you accept?', a: 'UPI (GPay, PhonePe, Paytm), debit/credit cards, net banking and Cash on Delivery.' },
+        { q: 'How much is shipping?', a: shippingLine },
+        { q: 'Can I return an item?', a: `Yes — within ${returnWindow} of delivery. See Returns & Exchanges for details.` },
+        { q: 'How do I reach you?', a: `Email ${supportEmail} or WhatsApp ${supportPhone} (${hours}).` },
+      ],
+    },
+    care: {
+      title: 'Fabric Care Guide',
+      items: [
+        { q: 'Washing', a: 'Hand wash or gentle machine wash in cold water. Wash block prints and dark colours separately for the first few washes.' },
+        { q: 'Drying', a: 'Dry in shade, inside out, to keep colours rich. Avoid tumble drying.' },
+        { q: 'Ironing', a: 'Iron on medium heat while slightly damp. Use a press cloth over prints and embellishments.' },
+        { q: 'Storage', a: 'Fold and store in a cool, dry place. Use muslin bags for silks and handlooms.' },
+      ],
+    },
+    size: {
+      title: 'Size Guide & Custom Lengths',
+      items: [
+        { q: 'Finding your size', a: 'Open any product and tap “Size Guide & Measurements” for bust, waist and length charts.' },
+        { q: 'Custom lengths', a: 'Most maxis come in 44" standard length with 46", 48" and 50" options available on the product page.' },
+        { q: 'Between sizes?', a: 'Our silhouettes have adjustable side ropes — we recommend your usual size, or one size up for a relaxed fit.' },
+        { q: 'Need help?', a: `Message us on WhatsApp at ${supportPhone} with your measurements and we will suggest a size.` },
+      ],
+    },
+    gifts: {
+      title: 'Gift Cards',
+      items: [
+        { q: 'Availability', a: `Digital ${brandName} gift cards are coming soon.` },
+        { q: 'Gifting today', a: `For gift orders or bulk gifting, contact us at ${supportEmail} and we will help you put it together.` },
+      ],
+    },
+  }
+  const section = content[topic]
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-label={section.title}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white max-w-lg w-full border border-black/10 shadow-2xl rounded-sm overflow-hidden animate-slide-down my-8"
+      >
+        <div className="bg-black text-white p-6 flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-mono tracking-[0.25em] text-white/60 uppercase">{brandName}</p>
+            <h2 className="text-lg font-serif">{section.title}</h2>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="text-white/70 hover:text-white text-xl cursor-pointer">
+            ✕
+          </button>
+        </div>
+        <div className="p-6 space-y-5 text-xs">
+          {section.items.map((item) => (
+            <div key={item.q}>
+              <p className="font-bold uppercase tracking-wider text-black mb-1">{item.q}</p>
+              <p className="text-black/65 leading-relaxed">{item.a}</p>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              onClose()
+              onOpenContact()
+            }}
+            className="w-full bg-black text-white font-bold text-xs tracking-[0.2em] uppercase py-3.5 hover:bg-stone-800 cursor-pointer"
+          >
+            Still have questions? Contact us →
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const FOOTER_LINK_ACTIONS: Record<string, { type: 'info'; topic: StoreInfoTopic } | { type: 'catalog' | 'about' | 'contact' }> = {
+  'Shipping & Delivery': { type: 'info', topic: 'shipping' },
+  'Returns & Exchanges': { type: 'info', topic: 'returns' },
+  FAQs: { type: 'info', topic: 'faq' },
+  'Fabric Care Guide': { type: 'info', topic: 'care' },
+  'Size Guide & Custom Lengths': { type: 'info', topic: 'size' },
+  'Gift Cards': { type: 'info', topic: 'gifts' },
+  'Contact & Support': { type: 'contact' },
+  'About Us': { type: 'about' },
+  'About Our Studio': { type: 'about' },
+  'Artisan Heritage': { type: 'about' },
+}
+
 // 18. FOOTER COMPONENT
 function Footer({
   tenant,
   onOpenLogin,
   onOpenComplianceDoc,
+  onOpenInfo,
+  onOpenAbout,
+  onOpenContact,
+  onBrowseCatalog,
+  onSubscribe,
 }: {
   tenant?: TenantConfig
   onOpenLogin?: () => void
   onOpenComplianceDoc?: (doc: ComplianceDocType) => void
+  onOpenInfo: (topic: StoreInfoTopic) => void
+  onOpenAbout: () => void
+  onOpenContact: (subject?: string) => void
+  onBrowseCatalog: (linkLabel: string) => void
+  onSubscribe: (email: string) => boolean
 }) {
-  const brandName = tenant?.name || 'THE LUNAR CLOTHING'
-  const brandTagline = tenant?.tagline || 'Handcrafted 100% soft cotton maxis, artisanal block prints, and festive dresses with functional side pockets.'
-  const shippingText = tenant?.contact?.shippingThresholdFormatted ? `Free Shipping over ${tenant.contact.shippingThresholdFormatted}` : 'Free Shipping over ₹999'
-
+  const [newsletterEmail, setNewsletterEmail] = useState('')
+  const [newsletterStatus, setNewsletterStatus] = useState<'idle' | 'joined' | 'already'>('idle')
+  const handleFooterLink = (label: string) => {
+    const action = FOOTER_LINK_ACTIONS[label] || { type: 'catalog' as const }
+    if (action.type === 'info') onOpenInfo(action.topic)
+    else if (action.type === 'about') onOpenAbout()
+    else if (action.type === 'contact') onOpenContact()
+    else onBrowseCatalog(label)
+  }
+  const footerLinkClass = 'hover:text-white transition-colors cursor-pointer text-left'
+  const brandName = tenant?.brandName || tenant?.name || 'THE LUNAR CLOTHING'
+  const copy = getStorefrontCopy(tenant)
+  const brandTagline = (tenant?.theme?.copy?.footerTagline?.trim() ? '' : tenant?.tagline) || copy.footerTagline
+  const shippingText = getShippingConfig(tenant).summary
+  const showTrustStrip = tenant?.theme?.footerOptions?.trustStrip ?? true
+  const showNewsletter = tenant?.theme?.footerOptions?.newsletter ?? true
+  const social = tenant?.theme?.socialLinks || {}
+  const supportDigits = (tenant?.contact?.phone || '').replace(/[^0-9]/g, '')
+  const socialLinks = [
+    { label: 'IG', name: 'Instagram', href: social.instagram },
+    { label: 'WA', name: 'WhatsApp', href: social.whatsapp || (supportDigits ? `https://wa.me/${supportDigits}` : '') },
+    { label: 'PT', name: 'Pinterest', href: social.pinterest },
+    { label: 'FB', name: 'Facebook', href: social.facebook },
+  ]
   return (
     <footer className="text-white border-t border-white/10" style={{ background: 'linear-gradient(180deg, #0a0a0f 0%, #050508 100%)' }}>
       {/* Trust Strip */}
+      {showTrustStrip && (
       <div className="border-b border-white/8 py-6">
         <div className="max-w-screen-2xl mx-auto px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {[
-              { icon: '✈️', title: 'Free Shipping', sub: 'On orders above ₹999' },
-              { icon: '🔄', title: '30-Day Returns', sub: 'Hassle-free exchanges' },
-              { icon: '🛡️', title: 'Quality Assured', sub: '100% authentic fabrics' },
-              { icon: '💬', title: 'WhatsApp Support', sub: 'Mon–Sat, 10AM–7PM IST' },
-            ].map((item) => (
+            {copy.footerTrust.map((item) => (
               <div key={item.title} className="flex items-start gap-3">
                 <span className="text-2xl mt-0.5">{item.icon}</span>
                 <div>
@@ -4594,6 +5046,7 @@ function Footer({
           </div>
         </div>
       </div>
+      )}
 
       <div className="max-w-screen-2xl mx-auto px-6 pt-14 pb-8">
         {/* Main Grid */}
@@ -4606,13 +5059,13 @@ function Footer({
             </p>
             {/* Social Links */}
             <div className="flex gap-3">
-              {[
-                { label: 'IG', name: 'Instagram' },
-                { label: 'WA', name: 'WhatsApp' },
-                { label: 'PT', name: 'Pinterest' },
-                { label: 'FB', name: 'Facebook' },
-              ].map((s) => (
-                <a key={s.name} href="#" title={s.name} className="w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-bold text-white/60 hover:text-white transition-all hover:scale-105" style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)' }}>
+              {socialLinks.filter((s) => s.href).map((s) => (
+                <a
+                  key={s.name}
+                  href={s.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={s.name} className="w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-bold text-white/60 hover:text-white transition-all hover:scale-105" style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)' }}>
                   {s.label}
                 </a>
               ))}
@@ -4624,23 +5077,21 @@ function Footer({
             <div>
               <h4 className="text-[10px] font-bold tracking-[0.25em] uppercase text-white/30 mb-5">CUSTOMER CARE</h4>
               <ul className="space-y-3 text-xs text-white/60">
-                <li><a href="#" className="hover:text-white transition-colors">{shippingText}</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Shipping & Delivery</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Fabric Care Guide</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Size Guide & Custom Lengths</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Returns & Exchanges</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Contact & Support</a></li>
+                {!isTemplateStore(tenant) && (
+                  <li><button type="button" onClick={() => onOpenInfo('shipping')} className={footerLinkClass}>{shippingText}</button></li>
+                )}
+                {copy.footerCareLinks.map((link) => (
+                  <li key={link}><button type="button" onClick={() => handleFooterLink(link)} className={footerLinkClass}>{link}</button></li>
+                ))}
               </ul>
             </div>
 
             <div>
-              <h4 className="text-[10px] font-bold tracking-[0.25em] uppercase text-white/30 mb-5">OUR CRAFT</h4>
+              <h4 className="text-[10px] font-bold tracking-[0.25em] uppercase text-white/30 mb-5">{copy.footerExploreTitle}</h4>
               <ul className="space-y-3 text-xs text-white/60">
-                <li><a href="#" className="hover:text-white transition-colors">About Our Studio</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Artisan Heritage</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Kalamkari Prints</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">Handloom Weaves</a></li>
-                <li><a href="#" className="hover:text-white transition-colors">New Arrivals</a></li>
+                {copy.footerExploreLinks.map((link) => (
+                  <li key={link}><button type="button" onClick={() => handleFooterLink(link)} className={footerLinkClass}>{link}</button></li>
+                ))}
               </ul>
             </div>
 
@@ -4652,23 +5103,58 @@ function Footer({
                     <span>🔐</span><span>Portal & Console Login</span>
                   </button>
                 </li>
-                <li><a href="#" className="text-white/60 hover:text-white transition-colors">Apply as Merchant</a></li>
-                <li><a href="#" className="text-white/60 hover:text-white transition-colors">Brand Partnerships</a></li>
+                {tenant?.slug && (
+                  <li>
+                    <a href={sellerPortalUrl(tenant.slug)} className="flex items-center gap-2 text-stone-300 hover:text-white font-medium transition-colors">
+                      <span>🛍️</span><span>Seller portal</span>
+                    </a>
+                  </li>
+                )}
+                <li>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onOpenContact(
+                        copy.contactSubjects.find((s) => /collab|bulk|wholesale/i.test(s.value))?.value ||
+                          copy.contactSubjects[0]?.value,
+                      )
+                    }
+                    className={`text-white/60 ${footerLinkClass}`}
+                  >
+                    Brand Partnerships
+                  </button>
+                </li>
               </ul>
             </div>
           </div>
         </div>
 
         {/* Newsletter Strip */}
+        {showNewsletter && (
         <div className="border border-white/10 p-6 mb-10 flex flex-col md:flex-row items-center justify-between gap-6" style={{ background: 'rgba(255,255,255,0.04)' }}>
           <div>
-            <p className="text-sm font-bold text-white uppercase tracking-wider">Join The Atelier</p>
-            <p className="text-xs text-white/50 mt-1">Exclusive trunk show access, early drops & artisan stories.</p>
+            <p className="text-sm font-bold text-white uppercase tracking-wider">{copy.newsletterTitle}</p>
+            <p className="text-xs text-white/50 mt-1">{copy.newsletterSub}</p>
           </div>
-          <form onSubmit={(e) => { e.preventDefault() }} className="flex gap-0 border border-white/20 flex-shrink-0">
+          <div className="flex-shrink-0">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              const added = onSubscribe(newsletterEmail.trim())
+              setNewsletterStatus(added ? 'joined' : 'already')
+              if (added) setNewsletterEmail('')
+            }}
+            className="flex gap-0 border border-white/20"
+          >
             <input
               type="email"
+              value={newsletterEmail}
+              onChange={(e) => {
+                setNewsletterEmail(e.target.value)
+                setNewsletterStatus('idle')
+              }}
               placeholder="YOUR EMAIL ADDRESS"
+              aria-label="Newsletter email"
               className="bg-transparent text-xs w-56 px-4 py-3 outline-none text-white placeholder-white/30 font-mono tracking-wider"
               required
             />
@@ -4676,7 +5162,14 @@ function Footer({
               JOIN →
             </button>
           </form>
+          {newsletterStatus !== 'idle' && (
+            <p className={`text-[11px] mt-2 ${newsletterStatus === 'joined' ? 'text-emerald-400' : 'text-amber-300'}`}>
+              {newsletterStatus === 'joined' ? "✓ You're on the list — thanks for subscribing!" : 'This email is already subscribed.'}
+            </p>
+          )}
+          </div>
         </div>
+        )}
 
         {/* Compliance Links Strip & Bottom Bar */}
         <div className="border-t border-white/8 pt-8 space-y-6">
@@ -4708,6 +5201,11 @@ function Footer({
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 Powered by Orvexa
               </span>
+              {tenant?.slug && (
+                <a href={storefrontUrl(tenant.slug, tenant.customDomainVerified ? tenant.customDomain : undefined)} className="text-white/40 hover:text-white font-mono normal-case tracking-normal">
+                  {storefrontUrl(tenant.slug, tenant.customDomainVerified ? tenant.customDomain : undefined).replace(/^https?:\/\//, '')}
+                </a>
+              )}
             </div>
           </div>
 
@@ -4722,38 +5220,117 @@ function Footer({
 }
 
 // --- MAIN APP COMPONENT ---
+/** Storefront components a store can replace from src/tenants/<slug>/components/. */
+export type StorefrontSlotProps = {
+  AnnouncementBar: ComponentProps<typeof AnnouncementBar>
+  Navigation: ComponentProps<typeof Navigation>
+  Hero: ComponentProps<typeof HeroSection>
+  ProductCard: ComponentProps<typeof DefaultProductCard>
+  Footer: ComponentProps<typeof Footer>
+}
+
+function renderSlot<K extends keyof StorefrontSlotProps>(
+  storeModule: StoreModule | null,
+  name: K,
+  Default: ComponentType<StorefrontSlotProps[K]>,
+  props: StorefrontSlotProps[K]
+) {
+  // The signature above is fully typed; JSX can't check spreads of a generic props type.
+  const Custom = storeModule?.components?.[name] as ComponentType<Record<string, unknown>> | undefined
+  const Built = Default as ComponentType<Record<string, unknown>>
+  const p = props as Record<string, unknown>
+  return Custom ? <Custom {...p} Default={Default} /> : <Built {...p} />
+}
+
+/** CSS variables for theme values the store fixes in code (scoped to the storefront root). */
+function storeThemeStyle(storeModule: StoreModule | null): CSSProperties | undefined {
+  const t = storeModule?.theme
+  if (!t) return undefined
+  const vars: Record<string, string> = {}
+  if (t.primaryColor) vars['--brand-primary'] = t.primaryColor
+  if (t.accentColor) vars['--brand-accent'] = t.accentColor
+  if (t.backgroundColor) vars['--brand-bg'] = t.backgroundColor
+  if (t.fontSans) vars['--brand-font-sans'] = t.fontSans
+  if (t.fontDisplay) {
+    vars['--brand-font-display'] = t.fontDisplay
+    vars['--font-display'] = t.fontDisplay
+  }
+  return vars as CSSProperties
+}
+
+function sectionsAfter(storeModule: StoreModule | null, position: StoreSection['after']): StoreSection[] {
+  return (storeModule?.sections || []).filter((s) => (s.after || 'end') === position)
+}
+
 export default function App() {
   const layer = useApplicationLayer()
   const switchLayer = useSwitchLayer()
-  const { tenant } = useTenant()
+  const { tenant, loading: tenantLoading, error: tenantError } = useTenant()
 
   if (layer === 'admin') {
     return <AdminApp />
+  }
+
+  if (tenantLoading && !tenant) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-stone-50">
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-black/20 border-t-black rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-xs font-bold tracking-[0.2em] uppercase text-black/40">Loading store...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!tenant) {
+    return <StoreNotFound slug={tenantError?.match(/"([^"]+)"/)?.[1]} />
   }
 
   if (layer === 'dashboard') {
     return <DashboardApp />
   }
 
-  // Active Tenant Resolution
-  const activeTenant: TenantConfig = tenant || mockStore.getTenantBySlug('lunar') || MOCK_TENANTS[0]
-  const tenantProducts = useMemo(() => mockStore.getProducts(activeTenant.id), [activeTenant.id])
+  const baseTenant: TenantConfig = tenant
+  // Per-store frontend from src/tenants/<slug>/ (theme values, components, sections, CSS)
+  const { module: storeModule, ready: storeReady } = useStoreModule(baseTenant.slug)
+  const activeTenant = useMemo(() => applyStoreTheme(baseTenant, storeModule), [baseTenant, storeModule])
+  const [tenantProducts, setTenantProducts] = useState<Product[]>(() => mockStore.getProducts(activeTenant.id))
   const tenantReviews = useMemo(() => mockStore.getReviews(activeTenant.id), [activeTenant.id])
   const tenantOrders = useMemo(() => mockStore.getOrders(activeTenant.id), [activeTenant.id])
 
+  useEffect(() => {
+    const local = mockStore.getProducts(activeTenant.id)
+    setTenantProducts(local)
+    apiClient.getProducts(activeTenant.slug).then((list) => {
+      if (Array.isArray(list) && list.length) setTenantProducts(list)
+    }).catch(() => undefined)
+  }, [activeTenant.id, activeTenant.slug])
+
   const [showAnnouncement, setShowAnnouncement] = useState(true)
   const [view, setView] = useState<'home' | 'catalog' | 'pdp'>('home')
+
+  useEffect(() => {
+    trackStorefrontEvent(activeTenant.slug, 'page_view', `/${view}`)
+  }, [activeTenant.slug, view])
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null)
   
   // User Authentication & Order Tracking State
-  const [user, setUser] = useState<UserAccount | null>(null)
+  const [user, setUser] = useState<UserAccount | null>(() => shopperAccounts.getSession(activeTenant.id))
   const [orders, setOrders] = useState<TrackedOrder[]>(tenantOrders)
+  const myOrders = useMemo(() => {
+    if (!user) return []
+    const email = user.email.toLowerCase()
+    const isDemoShopper = !isTemplateStore(activeTenant) && email === DEMO_SHOPPER.email
+    return orders.filter((o) => (o.customerEmail ? o.customerEmail.toLowerCase() === email : isDemoShopper))
+  }, [orders, user, activeTenant])
   const [isAuthOpen, setIsAuthOpen] = useState(false)
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const [isAccountOpen, setIsAccountOpen] = useState(false)
   const [isAboutOpen, setIsAboutOpen] = useState(false)
   const [isContactOpen, setIsContactOpen] = useState(false)
+  const [contactSubject, setContactSubject] = useState<string | undefined>(undefined)
+  const [infoTopic, setInfoTopic] = useState<StoreInfoTopic | null>(null)
   const [isComplianceOpen, setIsComplianceOpen] = useState(false)
   const [complianceDoc, setComplianceDoc] = useState<ComplianceDocType>('gdpr')
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -4780,38 +5357,57 @@ export default function App() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
 
-  const [wishlist, setWishlist] = useState<number[]>([tenantProducts[0]?.id || 1, tenantProducts[1]?.id || 2])
+  // Escape dismisses informational overlays; forms (checkout, sign-in, contact) stay open to avoid losing input.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (infoTopic) setInfoTopic(null)
+      else if (isComplianceOpen) setIsComplianceOpen(false)
+      else if (isAboutOpen) setIsAboutOpen(false)
+      else if (isSearchOpen) setIsSearchOpen(false)
+      else if (isLoginModalOpen) setIsLoginModalOpen(false)
+      else if (isAccountOpen) setIsAccountOpen(false)
+      else if (isWishlistOpen) setIsWishlistOpen(false)
+      else if (isCartOpen) setIsCartOpen(false)
+      else if (isMobileMenuOpen) setIsMobileMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [infoTopic, isComplianceOpen, isAboutOpen, isSearchOpen, isLoginModalOpen, isAccountOpen, isWishlistOpen, isCartOpen, isMobileMenuOpen])
+
+  // Demo stores open with a pre-filled bag & wishlist; newly cloned stores start empty
+  const buildDemoCart = (): CartItem[] =>
+    !isTemplateStore(activeTenant) && tenantProducts.length > 0
+      ? [
+          {
+            product: tenantProducts[0],
+            selectedColor: tenantProducts[0].colors[0],
+            selectedSize: 'M',
+            selectedLining: 'No Lining',
+            selectedZip: 'None',
+            selectedLength: '44 inch',
+            quantity: 1,
+          },
+        ]
+      : []
+  const buildDemoWishlist = (): number[] =>
+    !isTemplateStore(activeTenant) && tenantProducts.length > 0
+      ? [tenantProducts[0].id, tenantProducts[1]?.id || tenantProducts[0].id]
+      : []
+
+  const [wishlist, setWishlist] = useState<number[]>(buildDemoWishlist)
   const [reviews, setReviews] = useState<Review[]>(tenantReviews)
-  const [cart, setCart] = useState<CartItem[]>([
-    {
-      product: tenantProducts[0] || PRODUCTS[0],
-      selectedColor: (tenantProducts[0] || PRODUCTS[0]).colors[0],
-      selectedSize: 'M',
-      selectedLining: 'No Lining',
-      selectedZip: 'None',
-      selectedLength: '44 inch',
-      quantity: 1,
-    },
-  ])
+  const [cart, setCart] = useState<CartItem[]>(buildDemoCart)
+  const [appliedPromo, setAppliedPromo] = useState<string | null>(null)
 
   // Sync state when active tenant changes
   useEffect(() => {
+    setUser(shopperAccounts.getSession(activeTenant.id))
     setOrders(tenantOrders)
     setReviews(tenantReviews)
-    if (tenantProducts.length > 0) {
-      setCart([
-        {
-          product: tenantProducts[0],
-          selectedColor: tenantProducts[0].colors[0],
-          selectedSize: 'M',
-          selectedLining: 'No Lining',
-          selectedZip: 'None',
-          selectedLength: '44 inch',
-          quantity: 1,
-        },
-      ])
-      setWishlist([tenantProducts[0].id, tenantProducts[1]?.id || tenantProducts[0].id])
-    }
+    setCart(buildDemoCart())
+    setWishlist(buildDemoWishlist())
+    setAppliedPromo(null)
   }, [activeTenant.id])
 
   const showToast = (msg: string) => {
@@ -4821,19 +5417,24 @@ export default function App() {
 
   const handleLoginSuccess = (loggedInUser: UserAccount, isNew?: boolean) => {
     setUser(loggedInUser)
+    shopperAccounts.setSession(activeTenant.id, loggedInUser)
+    trackStorefrontEvent(activeTenant.slug, isNew ? 'shopper_register' : 'shopper_signin')
     showToast(isNew ? `Account created! Email verified for ${loggedInUser.name}.` : `Welcome back, ${loggedInUser.name}!`)
     setIsAccountOpen(true)
   }
 
   const handleSignOut = () => {
     setUser(null)
+    shopperAccounts.setSession(activeTenant.id, null)
     setIsAccountOpen(false)
     showToast('Signed out successfully.')
   }
 
-  const handleOrderPlaced = (newOrder: TrackedOrder) => {
+  const handleOrderPlaced = (placedOrder: TrackedOrder, customerEmail?: string) => {
+    const email = (user?.email || customerEmail || '').trim().toLowerCase()
+    const newOrder: TrackedOrder = email ? { ...placedOrder, customerEmail: email } : placedOrder
     setOrders((prev) => [newOrder, ...prev])
-    mockStore.placeOrder(activeTenant.id, newOrder)
+    mockStore.placeOrder(activeTenant.id, newOrder, customerEmail || user?.email)
     
     // Log audit trail event
     auditLogger.log({
@@ -4897,16 +5498,14 @@ export default function App() {
       const existingIdx = prev.findIndex(
         (i) =>
           i.product.id === product.id &&
-          i.selectedColor.name === selectedColor.name &&
+          i.selectedColor?.name === selectedColor?.name &&
           i.selectedSize === selectedSize &&
           i.selectedLining === selectedLining &&
           i.selectedZip === selectedZip &&
           i.selectedLength === selectedLength
       )
       if (existingIdx > -1) {
-        const next = [...prev]
-        next[existingIdx].quantity += quantity
-        return next
+        return prev.map((item, i) => (i === existingIdx ? { ...item, quantity: item.quantity + quantity } : item))
       }
       return [
         ...prev,
@@ -4926,13 +5525,13 @@ export default function App() {
 
   const handleUpdateQuantity = (index: number, delta: number) => {
     setCart((prev) => {
-      const next = [...prev]
-      const newQty = next[index].quantity + delta
+      const target = prev[index]
+      if (!target) return prev
+      const newQty = target.quantity + delta
       if (newQty <= 0) {
-        return next.filter((_, i) => i !== index)
+        return prev.filter((_, i) => i !== index)
       }
-      next[index].quantity = newQty
-      return next
+      return prev.map((item, i) => (i === index ? { ...item, quantity: newQty } : item))
     })
   }
 
@@ -4941,77 +5540,116 @@ export default function App() {
   }
 
   const handleSaveReview = (newReviewData: { author: string; rating: number; title: string; comment: string }) => {
+    const productId = selectedProductId || tenantProducts[0]?.id || 1
+    const productName = tenantProducts.find((p) => p.id === productId)?.name
+    const isVerifiedBuyer = !!productName && myOrders.some((o) => o.items?.some((i) => i.name === productName))
     const newRev: Review = {
       id: Date.now(),
-      productId: selectedProductId || tenantProducts[0]?.id || 1,
+      productId,
       author: newReviewData.author,
       rating: newReviewData.rating,
-      date: 'Just now',
+      date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       title: newReviewData.title || 'Great Product!',
       comment: newReviewData.comment,
-      verified: true,
+      verified: isVerifiedBuyer,
     }
     setReviews((prev) => [newRev, ...prev])
     mockStore.submitReview(activeTenant.id, newRev)
-    showToast('Thank you! Your verified review has been published.')
+    showToast(isVerifiedBuyer ? 'Thank you! Your verified review has been published.' : 'Thank you! Your review has been published.')
   }
 
   const rawSubtotal = cart.reduce((acc, item) => acc + item.product.price * item.quantity, 0)
-  const selectedProduct = tenantProducts.find((p) => p.id === selectedProductId) || tenantProducts[0] || PRODUCTS[0]
+  const selectedProduct = tenantProducts.find((p) => p.id === selectedProductId) || tenantProducts[0]
 
-  return (
-    <div className="min-h-screen bg-stone-50/20 text-black font-sans antialiased relative selection:bg-rose-100 selection:text-black">
-      {/* Dynamic Ambient Background & Interactive Breeze Simulation */}
-      <InteractiveBackground />
+  // Avoid flashing the default storefront while this store's own frontend chunk loads.
+  if (!storeReady) return <div className="min-h-screen" />
 
-      {showAnnouncement && <AnnouncementBar tenant={activeTenant} onDismiss={() => setShowAnnouncement(false)} />}
-
-      <Navigation
+  const renderStoreSections = (position: StoreSection['after']) =>
+    sectionsAfter(storeModule, position).map(({ id, Component }) => (
+      <Component
+        key={`store-section-${id}`}
         tenant={activeTenant}
         products={tenantProducts}
-        cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)}
-        wishlistCount={wishlist.length}
-        user={user}
-        onOpenCart={() => setIsCartOpen(true)}
-        onOpenWishlist={() => setIsWishlistOpen(true)}
-        onOpenSearch={() => setIsSearchOpen(true)}
-        onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
-        onOpenAuth={() => setIsAuthOpen(true)}
-        onOpenAccount={() => setIsAccountOpen(true)}
-        onOpenAbout={() => setIsAboutOpen(true)}
-        onOpenContact={() => setIsContactOpen(true)}
+        onSelectProduct={handleSelectProduct}
         onNavigate={handleNavigate}
-        currentCategory={categoryFilter}
       />
+    ))
+
+  const renderBuiltInSection = (id: HomeSectionId) => {
+    switch (id) {
+      case 'trustBar':
+        return <TrustBar tenant={activeTenant} />
+      case 'bestsellers':
+        return (
+          <BestsellersSection
+            tenant={activeTenant}
+            products={tenantProducts}
+            wishlist={wishlist}
+            onToggleWishlist={handleToggleWishlist}
+            onSelectProduct={handleSelectProduct}
+            onViewAll={() => handleNavigate('catalog', 'all')}
+          />
+        )
+      case 'categories':
+        return (
+          <ShopByCategorySection
+            tenant={activeTenant}
+            products={tenantProducts}
+            onSelectCategory={(cat) => handleNavigate('catalog', cat)}
+          />
+        )
+      case 'featured':
+        return <LeggingsFabricMatrix tenant={activeTenant} products={tenantProducts} onSelectProduct={handleSelectProduct} />
+      case 'triptych':
+        return <ActivityTriptych tenant={activeTenant} products={tenantProducts} onSelectProduct={handleSelectProduct} />
+      case 'mission':
+        return <MissionBlock tenant={activeTenant} onShopClick={() => handleNavigate('catalog', 'all')} />
+    }
+  }
+
+  return (
+    <StoreModuleContext.Provider value={storeModule}>
+    <div
+      data-store={activeTenant.slug}
+      style={storeThemeStyle(storeModule)}
+      className="min-h-screen bg-stone-50/20 text-black font-sans antialiased relative selection:bg-rose-100 selection:text-black"
+    >
+      {/* Dynamic Ambient Background & Interactive Breeze Simulation */}
+      {(activeTenant?.theme?.enableAnimations ?? true) && <InteractiveBackground />}
+
+      {showAnnouncement &&
+        renderSlot(storeModule, 'AnnouncementBar', AnnouncementBar, { tenant: activeTenant, onDismiss: () => setShowAnnouncement(false) })}
+
+      {renderSlot(storeModule, 'Navigation', Navigation, {
+        tenant: activeTenant,
+        products: tenantProducts,
+        cartCount: cart.reduce((sum, item) => sum + item.quantity, 0),
+        wishlistCount: wishlist.length,
+        user,
+        onOpenCart: () => setIsCartOpen(true),
+        onOpenWishlist: () => setIsWishlistOpen(true),
+        onOpenSearch: () => setIsSearchOpen(true),
+        onOpenMobileMenu: () => setIsMobileMenuOpen(true),
+        onOpenAuth: () => setIsAuthOpen(true),
+        onOpenAccount: () => setIsAccountOpen(true),
+        onOpenAbout: () => setIsAboutOpen(true),
+        onOpenContact: () => setIsContactOpen(true),
+        onNavigate: handleNavigate,
+        currentCategory: categoryFilter,
+      })}
 
       <main>
         {view === 'home' && (
           <>
-            <HeroSection tenant={activeTenant} onShopClick={() => handleNavigate('catalog', 'all')} />
-            <TrustBar tenant={activeTenant} />
-            <BestsellersSection
-              tenant={activeTenant}
-              products={tenantProducts}
-              wishlist={wishlist}
-              onToggleWishlist={handleToggleWishlist}
-              onSelectProduct={handleSelectProduct}
-            />
-            <ShopByCategorySection
-              tenant={activeTenant}
-              products={tenantProducts}
-              onSelectCategory={(cat) => handleNavigate('catalog', cat)}
-            />
-            <LeggingsFabricMatrix
-              tenant={activeTenant}
-              products={tenantProducts}
-              onSelectProduct={handleSelectProduct}
-            />
-            <ActivityTriptych
-              tenant={activeTenant}
-              products={tenantProducts}
-              onSelectProduct={handleSelectProduct}
-            />
-            <MissionBlock tenant={activeTenant} onShopClick={() => handleNavigate('catalog', 'all')} />
+            {renderSlot(storeModule, 'Hero', HeroSection, { tenant: activeTenant, onShopClick: () => handleNavigate('catalog', 'all') })}
+            {renderStoreSections('hero')}
+            {getHomeSections(activeTenant).map((s) => (
+              <Fragment key={s.id}>
+                {s.visible && renderBuiltInSection(s.id)}
+                {renderStoreSections(s.id)}
+              </Fragment>
+            ))}
+            {renderStoreSections('end')}
           </>
         )}
 
@@ -5026,8 +5664,9 @@ export default function App() {
           />
         )}
 
-        {view === 'pdp' && (
+        {view === 'pdp' && selectedProduct && (
           <ProductDetailPage
+            key={selectedProduct.id}
             tenant={activeTenant}
             product={selectedProduct}
             products={tenantProducts}
@@ -5042,12 +5681,36 @@ export default function App() {
         )}
       </main>
 
-      <Footer
-        tenant={activeTenant}
-        onOpenLogin={() => setIsLoginModalOpen(true)}
-        onOpenComplianceDoc={(doc) => {
+      {renderSlot(storeModule, 'Footer', Footer, {
+        tenant: activeTenant,
+        onOpenLogin: () => setIsLoginModalOpen(true),
+        onOpenComplianceDoc: (doc) => {
           setComplianceDoc(doc)
           setIsComplianceOpen(true)
+        },
+        onOpenInfo: setInfoTopic,
+        onOpenAbout: () => setIsAboutOpen(true),
+        onOpenContact: (subject) => {
+          setContactSubject(subject)
+          setIsContactOpen(true)
+        },
+        onBrowseCatalog: (label) => {
+          const keywords = label.toLowerCase().split(/\s+/).filter((w) => w.length > 3)
+          const match = getStoreCategories(activeTenant, tenantProducts).find((c) =>
+            keywords.some((w) => c.name.toLowerCase().includes(w)),
+          )
+          handleNavigate('catalog', match?.slug || 'all')
+        },
+        onSubscribe: (email) => storeInbox.subscribe(activeTenant.id, email),
+      })}
+
+      <StoreInfoModal
+        tenant={activeTenant}
+        topic={infoTopic}
+        onClose={() => setInfoTopic(null)}
+        onOpenContact={() => {
+          setContactSubject(undefined)
+          setIsContactOpen(true)
         }}
       />
 
@@ -5081,9 +5744,12 @@ export default function App() {
 
       {/* Slide-over Shopping Bag */}
       <CartDrawer
+        tenant={activeTenant}
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
         cart={cart}
+        appliedPromo={appliedPromo}
+        onApplyPromo={setAppliedPromo}
         onUpdateQuantity={handleUpdateQuantity}
         onRemoveItem={handleRemoveItem}
         onStartCheckout={() => {
@@ -5094,38 +5760,46 @@ export default function App() {
 
       {/* Checkout Modal */}
       <CheckoutModal
+        key={isCheckoutOpen ? 'checkout-open' : 'checkout-closed'}
+        tenant={activeTenant}
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
         cart={cart}
-        subtotal={rawSubtotal}
-        discountAmount={0}
+        subtotal={rawSubtotal - getDiscountAmount(activeTenant, appliedPromo, rawSubtotal)}
+        discountAmount={getDiscountAmount(activeTenant, appliedPromo, rawSubtotal)}
         user={user}
         onOrderPlaced={handleOrderPlaced}
         onOpenAccount={() => setIsAccountOpen(true)}
+        discountCode={appliedPromo}
         onCompleteOrder={() => {
           setCart([])
+          setAppliedPromo(null)
           setIsCheckoutOpen(false)
         }}
       />
 
       {/* Authentication Modal (Integrated Shopper & Store Owner Portal) */}
       <AuthModal
+        key={isAuthOpen ? 'auth-open' : 'auth-closed'}
         tenant={activeTenant}
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         onLoginSuccess={handleLoginSuccess}
         onSellerLoginSuccess={() => {
-          showToast(`Welcome back, ${activeTenant.name} Store Owner!`)
+          showToast(`Welcome back, ${activeTenant.brandName || activeTenant.name} Store Owner!`)
           switchLayer('dashboard')
         }}
       />
 
       {/* Account & Real-Time Order Tracking Drawer */}
       <AccountDrawer
+        key={isAccountOpen ? 'account-open' : 'account-closed'}
+        tenant={activeTenant}
         isOpen={isAccountOpen}
         onClose={() => setIsAccountOpen(false)}
         user={user}
-        orders={orders}
+        orders={myOrders}
+        lookupOrders={orders}
         onSignOut={handleSignOut}
         onSelectProduct={handleSelectProduct}
       />
@@ -5143,14 +5817,21 @@ export default function App() {
 
       {/* Contact Customer Care Modal */}
       <ContactModal
+        key={isContactOpen ? 'contact-open' : 'contact-closed'}
         tenant={activeTenant}
         isOpen={isContactOpen}
-        onClose={() => setIsContactOpen(false)}
+        onClose={() => {
+          setIsContactOpen(false)
+          setContactSubject(undefined)
+        }}
         onSuccessMessage={(msg) => showToast(msg)}
+        user={user}
+        initialSubject={contactSubject}
       />
 
       {/* Interactive Search Overlay */}
       <SearchOverlay
+        key={isSearchOpen ? 'search-open' : 'search-closed'}
         tenant={activeTenant}
         products={tenantProducts}
         isOpen={isSearchOpen}
@@ -5171,12 +5852,12 @@ export default function App() {
 
       {/* WhatsApp Floating Chat Widget */}
       <a
-        href={`https://wa.me/${(activeTenant?.contact?.phone || '+919876543210').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${activeTenant?.name || 'The Lunar Clothing'}, I have an inquiry.`)}`}
+        href={`https://wa.me/${(activeTenant?.contact?.phone || activeTenant?.ownerPhone || '+919876543210').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hello ${activeTenant?.brandName || activeTenant?.name || 'The Lunar Clothing'}, I have an inquiry.`)}`}
         target="_blank"
         rel="noreferrer"
         className="fixed bottom-24 right-5 z-40 w-14 h-14 rounded-full flex items-center justify-center text-white text-2xl shadow-2xl transition-all hover:scale-110 active:scale-95 cursor-pointer animate-wa-bounce"
         style={{ background: 'linear-gradient(135deg, #25d366, #128c7e)', boxShadow: '0 4px 20px rgba(37,211,102,0.5)' }}
-        title={`Chat with ${activeTenant?.name || 'The Lunar Clothing'} on WhatsApp`}
+        title={`Chat with ${activeTenant?.brandName || activeTenant?.name || 'The Lunar Clothing'} on WhatsApp`}
         aria-label="Chat on WhatsApp"
       >
         <svg viewBox="0 0 32 32" className="w-7 h-7 fill-white">
@@ -5227,6 +5908,7 @@ export default function App() {
         ↑
       </button>
     </div>
+    </StoreModuleContext.Provider>
   )
 }
 

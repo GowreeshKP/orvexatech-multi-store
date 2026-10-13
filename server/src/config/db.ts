@@ -6,14 +6,18 @@ import mongoose, { type Connection } from 'mongoose'
 import dotenv from 'dotenv'
 import dns from 'dns'
 
-// Ensure SRV records resolve cleanly even in environments with restrictive local DNS
-try {
-  dns.setServers(['8.8.8.8', '1.1.1.1'])
-} catch (e) {
-  // Ignore in environments where setServers is restricted
-}
-
 dotenv.config()
+
+// Some local networks cannot resolve Atlas SRV records. Production keeps the platform resolver
+// unless DNS_SERVERS (comma-separated) is set explicitly.
+const dnsServers = process.env.DNS_SERVERS || (process.env.NODE_ENV === 'production' ? '' : '8.8.8.8,1.1.1.1')
+if (dnsServers) {
+  try {
+    dns.setServers(dnsServers.split(',').map((s) => s.trim()).filter(Boolean))
+  } catch {
+    // Ignore in environments where setServers is restricted
+  }
+}
 
 const MASTER_URI = process.env.MONGODB_MASTER_URI || 'mongodb://localhost:27017/orvexatech_master'
 const TENANT_BASE_URI = process.env.MONGODB_TENANT_BASE_URI || 'mongodb://localhost:27017/orvexa_tenant_'
@@ -102,9 +106,12 @@ export async function getTenantConnection(tenantSlug: string, customMongoUri?: s
   }
 
   const connectionUri = customMongoUri?.trim() || `${TENANT_BASE_URI}${tenantSlug}`
+  // Atlas URIs often omit the database path, which would otherwise land data in "test".
+  const hasDbPath = /^mongodb(?:\+srv)?:\/\/[^/]+\/[^/?]+/.test(connectionUri)
 
   try {
     const tenantConn = mongoose.createConnection(connectionUri, {
+      ...(hasDbPath ? {} : { dbName: `orvexa_tenant_${tenantSlug}` }),
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
       maxPoolSize: 5,
@@ -139,7 +146,7 @@ export async function getTenantConnection(tenantSlug: string, customMongoUri?: s
  */
 export async function closeTenantConnection(tenantSlug: string): Promise<void> {
   for (const [key, conn] of tenantConnectionPool.entries()) {
-    if (key.includes(tenantSlug)) {
+    if (key === tenantSlug || key === `custom_${tenantSlug}`) {
       await conn.close()
       tenantConnectionPool.delete(key)
     }
