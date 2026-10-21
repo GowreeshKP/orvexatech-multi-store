@@ -114,15 +114,71 @@ async function staffSession(masterDb: Connection, tenant: ITenant, staff: ITenan
 
 /** Store-owner login result: a session, or an HTTP status + message. */
 async function attemptSellerLogin(masterDb: Connection, loginId: string, password: string) {
-  const tenant = await getTenantModel(masterDb).findOne({ $or: [{ ownerEmail: loginId }, { slug: loginId }] })
-  const ok = await bcrypt.compare(password, tenant?.passwordHash && !isResetPending(tenant) ? tenant.passwordHash : DUMMY_HASH)
-  if (!tenant) return null
-  if (isResetPending(tenant)) return { status: 401, body: { error: RESET_PENDING, passwordResetPending: true } }
-  if (!ok) return null
-  if (tenant.status === 'suspended') return { status: 403, body: { error: 'Your store has been suspended. Please contact support.' } }
-  if (tenant.status === 'pending') return { status: 403, body: { error: 'Your store application is still under review.' } }
-  if (tenant.status === 'cancelled') return { status: 403, body: { error: 'This store has been closed. Please contact support.' } }
-  return { status: 200, body: await sellerSession(masterDb, tenant) }
+  const Tenant = getTenantModel(masterDb)
+  const email = loginId.includes('@') ? loginId : null
+
+  // Slug is unique — prefer it. Email may be shared across stores (same owner, multiple brands),
+  // so collect every match and accept the first whose password verifies.
+  const candidates = loginId
+    ? await Tenant.find(
+        email
+          ? {
+              $or: [
+                { slug: loginId },
+                { ownerEmail: email },
+                {
+                  ownerEmail: {
+                    $regex: `^${email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+                    $options: 'i',
+                  },
+                },
+              ],
+            }
+          : { slug: loginId }
+      ).sort({ createdAt: -1 })
+    : []
+
+  if (candidates.length === 0) return null
+
+  const pending = candidates.find((t) => isResetPending(t))
+  if (pending && candidates.every((t) => isResetPending(t))) {
+    return { status: 401, body: { error: RESET_PENDING, passwordResetPending: true } }
+  }
+
+  let matched = null as (typeof candidates)[number] | null
+  for (const tenant of candidates) {
+    if (isResetPending(tenant) || !tenant.passwordHash) continue
+    if (await bcrypt.compare(password, tenant.passwordHash)) {
+      matched = tenant
+      break
+    }
+  }
+
+  if (!matched) {
+    if (candidates.every((t) => !t.passwordHash || isResetPending(t))) {
+      return {
+        status: 401,
+        body: {
+          error: 'This store has no owner password yet. Ask Super Admin to set one under Store Credentials.',
+        },
+      }
+    }
+    // Ambiguous email + wrong password: nudge merchants to use the store slug.
+    if (email && candidates.length > 1) {
+      return {
+        status: 401,
+        body: {
+          error: `That email is used on more than one store (${candidates.map((t) => t.slug).join(', ')}). Sign in with the store slug instead.`,
+        },
+      }
+    }
+    return null
+  }
+
+  if (matched.status === 'suspended') return { status: 403, body: { error: 'Your store has been suspended. Please contact support.' } }
+  if (matched.status === 'pending') return { status: 403, body: { error: 'Your store application is still under review.' } }
+  if (matched.status === 'cancelled') return { status: 403, body: { error: 'This store has been closed. Please contact support.' } }
+  return { status: 200, body: await sellerSession(masterDb, matched) }
 }
 
 // ─────────────────────────────────────────────────────────

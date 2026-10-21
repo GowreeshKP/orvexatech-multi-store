@@ -149,21 +149,66 @@ class MockPlatformStore {
     this.persist()
   }
 
+  // Tenants loaded from the master DB replace local copies by id (and by slug when ids differ).
+  mergeTenants(remote: TenantConfig[]): void {
+    remote.forEach((t) => {
+      const existing =
+        this.tenants.get(t.id) ||
+        Array.from(this.tenants.values()).find((local) => local.slug === t.slug)
+      if (existing && existing.id !== t.id) {
+        this.tenants.delete(existing.id)
+        const oldDb = this.tenantDatabases.get(existing.id)
+        if (oldDb && !this.tenantDatabases.has(t.id)) {
+          this.tenantDatabases.set(t.id, oldDb)
+        }
+        this.tenantDatabases.delete(existing.id)
+      }
+      this.tenants.set(t.id, { ...existing, ...t })
+      this.ensureTenantDatabase(t.id)
+    })
+    this.persist()
+  }
+
+  /** Empty isolated DB for a newly approved / API-synced tenant (products come from the real API later). */
+  private ensureTenantDatabase(tenantId: string): TenantDatabase {
+    let db = this.tenantDatabases.get(tenantId)
+    if (!db) {
+      db = { products: [], reviews: [], orders: [], customers: [] }
+      this.tenantDatabases.set(tenantId, db)
+    }
+    return db
+  }
+
   approveTenant(applicationId: string, slugOverride?: string): TenantConfig | null {
     const app = this.applications.get(applicationId)
     if (!app || app.status === 'waitlist') return null
 
     const slug = slugOverride || app.requestedSlug
     const existingTenant = Array.from(this.tenants.values()).find((t) => t.slug === slug)
-    // Only a placeholder store created for this application may be reused; a live store keeps its address.
-    if (existingTenant && existingTenant.status !== 'pending') return null
 
     app.requestedSlug = slug
     app.status = 'approved'
     app.slugCheck = { available: true }
 
+    // Backend approval may have already created an active tenant (or a prior sync pulled it in).
+    // Reuse it when it belongs to this applicant; otherwise keep the address locked.
+    if (existingTenant && existingTenant.status !== 'pending') {
+      const sameOwner =
+        existingTenant.ownerEmail?.toLowerCase() === app.ownerEmail.toLowerCase() ||
+        existingTenant.brandName?.toLowerCase() === app.brandName.toLowerCase()
+      if (!sameOwner) {
+        app.status = 'pending'
+        this.persist()
+        return null
+      }
+      this.ensureTenantDatabase(existingTenant.id)
+      this.persist()
+      return existingTenant
+    }
+
     if (existingTenant) {
       existingTenant.status = 'active'
+      this.ensureTenantDatabase(existingTenant.id)
       this.persist()
       return existingTenant
     }
@@ -311,7 +356,7 @@ class MockPlatformStore {
       storeType: appData.storeType || inferStoreType(appData.niche),
       categories: appData.categories,
       requestedSlug: slug,
-      message: appData.message || 'Client application submitted via Orvexa Cloud platform portal',
+      message: appData.message || 'Local demo application (production intake is marketing-site → POST /api/public/signups)',
       submittedAt: new Date().toISOString().split('T')[0],
       status: 'pending',
     }
@@ -406,13 +451,14 @@ class MockPlatformStore {
   private getDB(tenantId: string): TenantDatabase {
     let db = this.tenantDatabases.get(tenantId)
     if (!db) {
-      // Check if tenantId was passed as slug
+      // Resolve slug → tenant id, then create an empty DB for API-provisioned stores.
       const tenant = Array.from(this.tenants.values()).find((t) => t.slug === tenantId || t.id === tenantId)
       if (tenant) {
-        db = this.tenantDatabases.get(tenant.id)
+        db = this.ensureTenantDatabase(tenant.id)
+      } else {
+        db = this.ensureTenantDatabase(tenantId)
       }
     }
-    if (!db) throw new Error(`No database found for tenant ${tenantId}`)
     return db
   }
 

@@ -576,17 +576,25 @@ export const authService = {
         body: JSON.stringify({ loginId: cleanId, password: cleanPass }),
       })
 
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
 
+      // Never fall through to a tokenless demo session on 401 — store APIs would keep failing.
       if (!response.ok) {
-        throw new Error(data.error || 'Backend unavailable')
+        return { success: false, error: data.error || 'Invalid login ID or password.' }
+      }
+
+      const token = data.accessToken || data.token
+      if (!token || !data.session) {
+        return {
+          success: false,
+          error: 'Seller login succeeded but no access token was returned. Check the API server.',
+        }
       }
 
       const session: SellerSession = data.session
       try {
         localStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session))
-        const token = data.accessToken || data.token
-        if (token) localStorage.setItem(SELLER_TOKEN_KEY, token)
+        localStorage.setItem(SELLER_TOKEN_KEY, token)
         if (data.refreshToken) localStorage.setItem('orvexa_refresh_token', data.refreshToken)
       } catch {
         // storage disabled
@@ -605,11 +613,11 @@ export const authService = {
       })
 
       return { success: true, session }
-    } catch (err: any) {
+    } catch {
       if (!DEMO_MODE) {
-        return { success: false, error: err.message || 'Invalid login ID or password.' }
+        return { success: false, error: 'Could not reach the authentication server. Please check your connection.' }
       }
-      // ── Demo mode: offline credential verification ──────────
+      // ── Demo mode only when the API is unreachable ──────────
       const allCreds = this.getStoreCredentialsList()
 
       const matchingAccount = allCreds.find(
@@ -650,6 +658,7 @@ export const authService = {
         }
         try {
           localStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session))
+          localStorage.removeItem(SELLER_TOKEN_KEY)
         } catch {
           // ignored
         }
@@ -669,12 +678,7 @@ export const authService = {
         return { success: true, session }
       }
 
-      return {
-        success: false,
-        error: err.message?.includes('Backend unavailable')
-          ? 'Invalid login ID or password. Please check the credentials.'
-          : (err.message || 'Invalid Login ID or password.'),
-      }
+      return { success: false, error: 'Could not reach the authentication server. Please check your connection.' }
     }
   },
 
@@ -692,10 +696,50 @@ export const authService = {
 
   getSellerToken(): string | null {
     try {
-      return localStorage.getItem(SELLER_TOKEN_KEY)
+      const token = localStorage.getItem(SELLER_TOKEN_KEY)
+      if (token && isTokenExpired(token)) {
+        void this.refreshSellerToken()
+      }
+      return token
     } catch {
       return null
     }
+  },
+
+  async refreshSellerToken(): Promise<string | null> {
+    try {
+      const storedRefresh = typeof window !== 'undefined' ? localStorage.getItem('orvexa_refresh_token') : null
+      if (!storedRefresh) return null
+      const res = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: storedRefresh }),
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      const newToken = data.accessToken || data.token
+      if (!newToken) return null
+      localStorage.setItem(SELLER_TOKEN_KEY, newToken)
+      if (data.refreshToken) localStorage.setItem('orvexa_refresh_token', data.refreshToken)
+      return newToken
+    } catch {
+      return null
+    }
+  },
+
+  async getValidSellerToken(): Promise<string | null> {
+    let token = this.getSellerToken()
+    if (!token || isTokenExpired(token)) {
+      token = await this.refreshSellerToken()
+    }
+    return token
+  },
+
+  /** Prefer merchant JWT; fall back to Super Admin JWT (platform can manage any store). */
+  async getStoreAccessToken(): Promise<string | null> {
+    const seller = await this.getValidSellerToken()
+    if (seller) return seller
+    return this.getValidAdminToken()
   },
 
   logoutSeller() {
@@ -783,19 +827,29 @@ export const authService = {
         body: JSON.stringify({ loginId: cleanId, password: cleanPass }),
       })
 
-      const data = await response.json()
+      const data = await response.json().catch(() => ({}))
 
+      // Auth failures must not fall through to a tokenless demo session — otherwise
+      // GET /admin/applications silently 401s and marketing signups never appear.
       if (!response.ok) {
-        throw new Error(data.error || 'Backend unavailable')
+        return {
+          success: false,
+          error: data.error || 'Invalid Super Admin credentials.',
+        }
+      }
+
+      const token = data.accessToken || data.token
+      if (!token || !data.session) {
+        return {
+          success: false,
+          error: 'Admin login succeeded but no access token was returned. Check the API server.',
+        }
       }
 
       const session: AdminSession = data.session
       try {
         localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session))
-        const token = data.accessToken || data.token
-        if (token) {
-          localStorage.setItem(ADMIN_TOKEN_KEY, token)
-        }
+        localStorage.setItem(ADMIN_TOKEN_KEY, token)
         if (data.refreshToken) {
           localStorage.setItem('orvexa_refresh_token', data.refreshToken)
         }
@@ -804,8 +858,8 @@ export const authService = {
       }
 
       return { success: true, session }
-    } catch (err: any) {
-      // ── Demo mode only: offline admin login ──────────────
+    } catch {
+      // Network / API unreachable only — optional offline demo (no JWT, no marketing sync).
       const isDemo =
         DEMO_MODE &&
         (cleanId === 'admin@orvexatech.com' || cleanId === 'admin@platform.com' || cleanId === 'admin') &&
@@ -821,6 +875,8 @@ export const authService = {
         }
         try {
           localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session))
+          localStorage.removeItem(ADMIN_TOKEN_KEY)
+          localStorage.removeItem('orvexa_refresh_token')
         } catch {
           // ignored
         }
@@ -829,9 +885,7 @@ export const authService = {
 
       return {
         success: false,
-        error: err.message?.includes('Backend unavailable')
-          ? 'Could not reach the authentication server. Please check your connection.'
-          : (err.message || 'Invalid Super Admin credentials.'),
+        error: 'Could not reach the authentication server. Please check your connection.',
       }
     }
   },
@@ -901,6 +955,7 @@ export const authService = {
     try {
       localStorage.removeItem(ADMIN_SESSION_KEY)
       localStorage.removeItem(ADMIN_TOKEN_KEY)
+      localStorage.removeItem('orvexa_refresh_token')
     } catch {
       // ignored
     }

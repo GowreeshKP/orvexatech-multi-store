@@ -12,12 +12,13 @@ export default function SellerLogin({ tenant, onLoginSuccess }: SellerLoginProps
     authService.getStoreCredentialsList()
   )
 
-  const initialCred = tenant
-    ? authService.getStoreCredential(tenant.slug)
-    : credentialsList[0] || { loginId: 'gowreesh@thelunarclothing.com', password: 'lunar@password' }
-
-  const [loginId, setLoginId] = useState(initialCred.loginId)
-  const [password, setPassword] = useState(initialCred.password)
+  // Prefer this store's slug (always works once Super Admin set a password). Avoid autofilling
+  // stale demo passwords from localStorage — those cause "Invalid login credentials" against the API.
+  const storedCred = tenant ? authService.getStoreCredential(tenant.slug) : null
+  const [loginId, setLoginId] = useState(
+    () => storedCred?.loginId || tenant?.slug || tenant?.ownerEmail || credentialsList[0]?.loginId || ''
+  )
+  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -98,19 +99,26 @@ export default function SellerLogin({ tenant, onLoginSuccess }: SellerLoginProps
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wider text-white/70 mb-1.5">
-              Merchant Login ID / Email or Subdomain
+              Store slug or owner email
             </label>
             <div className="relative">
               <input
                 type="text"
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
-                placeholder="e.g. gowreesh@thelunarclothing.com or lunar"
+                placeholder={tenant?.slug ? `e.g. ${tenant.slug} or ${tenant.ownerEmail}` : 'e.g. fashion or owner@brand.com'}
                 className="w-full bg-black/50 border border-white/15 focus:border-amber-400/80 rounded-xl px-4 py-3 text-xs text-white placeholder-white/25 outline-none transition-all"
                 required
               />
               <span className="absolute right-3.5 top-3.5 text-white/40 text-xs">✉️</span>
             </div>
+            {tenant?.slug && (
+              <p className="mt-1.5 text-[10px] text-white/45">
+                Use store slug <span className="font-mono text-amber-300/90">{tenant.slug}</span>
+                {tenant.ownerEmail ? <> or email <span className="font-mono text-amber-300/90">{tenant.ownerEmail}</span></> : null}.
+                Password is set by Super Admin under Store Credentials.
+              </p>
+            )}
           </div>
 
           <div>

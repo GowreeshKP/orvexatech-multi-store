@@ -117,6 +117,7 @@ export default function AdminApp() {
   const [activeView, setActiveView] = useState<AdminView>('dashboard')
   const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false)
   const [adminToast, setAdminToast] = useState<string | null>(null)
+  const [navOpen, setNavOpen] = useState(false)
   const { provisionTenant, refresh: refreshTenants } = useAdminTenants()
 
   // URL Reset Token Detection for Store Owners
@@ -137,6 +138,29 @@ export default function AdminApp() {
 
   useEffect(() => {
     document.title = session ? 'Orvexa Admin Portal' : 'Sign In | Orvexa Admin Portal'
+  }, [session])
+
+  // Marketing signups only load with a real Super Admin JWT. Tokenless demo sessions
+  // leave the queue stuck on mock seed apps — force a fresh sign-in when the API is up.
+  useEffect(() => {
+    if (!session) return
+    let cancelled = false
+    void (async () => {
+      const token = await authService.getValidAdminToken()
+      if (cancelled || token) return
+      try {
+        const health = await fetch('/api/health')
+        if (!cancelled && health.ok) {
+          authService.logoutAdmin()
+          setSession(null)
+        }
+      } catch {
+        // API offline: keep a local demo session for UI work.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [session])
 
   const handleLogout = () => {
@@ -168,89 +192,45 @@ export default function AdminApp() {
   }
 
   return (
-    <div className="min-h-screen text-slate-900 flex bg-[#f8fafc] font-sans antialiased selection:bg-indigo-500 selection:text-white">
-      {/* Sleek Enterprise Sidebar */}
-      <aside className="w-64 flex flex-col flex-shrink-0 bg-white border-r border-slate-200/80 shadow-[1px_0_8px_rgba(0,0,0,0.02)] z-30">
-        {/* Platform Brand */}
-        <div className="h-16 flex items-center px-5 gap-3 border-b border-slate-100/90">
-          <div className="w-8 h-8 rounded-lg bg-slate-950 flex items-center justify-center text-white text-xs font-black shadow-sm ring-1 ring-white/20">
-            <span className="bg-gradient-to-tr from-amber-400 to-indigo-400 bg-clip-text text-transparent">O</span>
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-semibold text-slate-950 tracking-tight">Orvexa Cloud</span>
-              <span className="text-[9px] font-mono font-semibold px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">v2.4</span>
-            </div>
-            <p className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">SUPER ADMIN CONSOLE</p>
-          </div>
+    <div className="shell">
+      {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} aria-hidden />}
+      <aside className={`sidebar${navOpen ? ' open' : ''}`}>
+        <div className="brand-row">
+          <img src="/brand/logo-white.svg" alt="Orvexa Cloud" />
+          <span className="portal-chip">Super Admin</span>
         </div>
 
-        {/* Navigation */}
-        <div className="p-3">
-          <div className="flex items-center justify-between px-3 mb-2">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Platform Management</p>
-          </div>
-          <nav className="space-y-1">
-            {ADMIN_NAV.map((item) => {
-              const isActive = activeView === item.id
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveView(item.id)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-slate-950 text-white shadow-sm shadow-slate-950/15'
-                      : 'text-slate-600 hover:text-slate-950 hover:bg-slate-100/80'
-                  }`}
-                >
-                  <NavIcon type={item.icon} className={`w-4 h-4 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
-                  <span className="flex-1 text-left">{item.label}</span>
-                  {item.id === 'applications' && <PendingBadge />}
-                  {item.id === 'leads' && <LeadsBadge />}
-                </button>
-              )
-            })}
-          </nav>
-        </div>
+        <p className="nav-group">Platform</p>
+        <nav className="col" style={{ gap: 4 }}>
+          {ADMIN_NAV.map((item) => {
+            const isActive = activeView === item.id
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setActiveView(item.id)
+                  setNavOpen(false)
+                }}
+                className={`nav-item${isActive ? ' active' : ''}`}
+              >
+                <NavIcon type={item.icon} className="w-4 h-4" />
+                <span className="grow">{item.label}</span>
+                {item.id === 'applications' && <PendingBadge />}
+                {item.id === 'leads' && <LeadsBadge />}
+              </button>
+            )
+          })}
+        </nav>
 
-        {/* Live Cluster Info Card */}
-        <div className="mt-auto p-3">
-          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 mb-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Cluster Status</span>
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Operational
-              </span>
+        <div className="sidebar-foot">
+          <div className="user-card">
+            <span className="avatar sm">{session.name?.charAt(0).toUpperCase() || 'A'}</span>
+            <div className="grow min-w-0">
+              <p className="nm truncate">{session.name || 'Super Admin'}</p>
+              <p className="rl truncate">master@orvexatech.com</p>
             </div>
-            <div className="text-[11px] font-mono text-slate-600 space-y-1">
-              <div className="flex justify-between">
-                <span>Region:</span>
-                <span className="font-semibold text-slate-800">Set by hosting</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Master DB:</span>
-                <span className="font-semibold text-slate-800">MongoDB Atlas</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Super Admin User Footer */}
-          <div className="p-2.5 rounded-xl border border-slate-200/80 bg-white flex items-center justify-between shadow-xs">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-bold ring-2 ring-slate-100 flex-shrink-0">
-                {session.name?.charAt(0).toUpperCase() || 'A'}
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-semibold text-slate-900 truncate leading-tight">{session.name || 'Super Admin'}</p>
-                <p className="text-[9px] font-mono text-slate-400 truncate">master@orvexatech.com</p>
-              </div>
-            </div>
-            <button
-              onClick={handleLogout}
-              title="Sign Out Super Admin"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-            >
+            <button type="button" className="btn btn-ghost btn-icon" onClick={handleLogout} title="Sign out" style={{ color: 'var(--on-ink-2)' }}>
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
               </svg>
@@ -259,55 +239,44 @@ export default function AdminApp() {
         </div>
       </aside>
 
-      {/* Main Workspace View */}
-      <main className="flex-1 overflow-y-auto min-h-screen">
-        {/* Top App Bar */}
-        <header className="h-16 sticky top-0 z-20 flex items-center justify-between px-8 bg-white/90 backdrop-blur-md border-b border-slate-200/80">
-          <div className="flex items-center gap-3">
-            <h1 className="text-sm font-bold text-slate-900 tracking-tight">
-              {ADMIN_NAV.find((n) => n.id === activeView)?.label}
-            </h1>
-            <span className="text-slate-300">/</span>
-            <span className="text-xs text-slate-400 font-mono">Platform Admin</span>
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            <a
-              href="/t/lunar"
-              target="_blank"
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 cursor-pointer"
-            >
-              <span>🏪</span>
-              <span>Storefront Demo ↗</span>
+      <div className="min-w-0 flex flex-col min-h-screen">
+        <header className="topbar">
+          <button type="button" className="menu-btn btn btn-outline btn-icon" onClick={() => setNavOpen(true)} aria-label="Open menu">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+          </button>
+          <span className="crumb">Platform Admin</span>
+          <span className="muted">/</span>
+          <strong style={{ fontFamily: 'var(--font-display)' }}>{ADMIN_NAV.find((n) => n.id === activeView)?.label}</strong>
+          <div className="right row" style={{ gap: 10 }}>
+            <a href="/t/lunar" target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
+              Storefront demo
             </a>
-
-            <div className="h-4 w-px bg-slate-200 mx-1" />
-
-            <span className="inline-flex items-center gap-1.5 text-xs font-mono font-medium px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
-              Super Admin Session Active
+            <span className="pill gold">
+              <span className="dot" />
+              Session active
             </span>
           </div>
         </header>
 
-        {/* Content Container */}
-        <div className="p-8 max-w-7xl mx-auto">
-          {activeView === 'dashboard' && (
-            <PlatformOverview
-              onSwitchView={setActiveView}
-              onOpenProvisionModal={() => setIsProvisionModalOpen(true)}
-            />
-          )}
-          {activeView === 'applications' && <ApplicationQueue />}
-          {activeView === 'leads' && <ClientLeadsCRM onSwitchView={setActiveView} />}
-          {activeView === 'stores' && (
-            <TenantDirectory onOpenProvisionModal={() => setIsProvisionModalOpen(true)} />
-          )}
-          {activeView === 'billing' && <BillingManager />}
-          {activeView === 'domains' && <DomainManager />}
-          {activeView === 'audit' && <PlatformAuditLogs />}
-        </div>
-      </main>
+        <main className="main">
+          <div className="page">
+            {activeView === 'dashboard' && (
+              <PlatformOverview
+                onSwitchView={setActiveView}
+                onOpenProvisionModal={() => setIsProvisionModalOpen(true)}
+              />
+            )}
+            {activeView === 'applications' && <ApplicationQueue />}
+            {activeView === 'leads' && <ClientLeadsCRM onSwitchView={setActiveView} />}
+            {activeView === 'stores' && (
+              <TenantDirectory onOpenProvisionModal={() => setIsProvisionModalOpen(true)} />
+            )}
+            {activeView === 'billing' && <BillingManager />}
+            {activeView === 'domains' && <DomainManager />}
+            {activeView === 'audit' && <PlatformAuditLogs />}
+          </div>
+        </main>
+      </div>
 
       {/* Provision Store Modal */}
       <ProvisionStoreModal
@@ -349,20 +318,13 @@ function PendingBadge() {
   const { applications } = useAdminApplications()
   const pending = applications.filter((a) => a.status === 'pending').length
   if (pending === 0) return null
-  return (
-    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-amber-500 text-white font-mono shadow-xs">
-      {pending}
-    </span>
-  )
+  return <span className="nav-badge">{pending}</span>
 }
 
 function LeadsBadge() {
   const { applications } = useAdminApplications()
-  return (
-    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-indigo-500 text-white font-mono shadow-xs">
-      {applications.length}
-    </span>
-  )
+  if (applications.length === 0) return null
+  return <span className="nav-badge">{applications.length}</span>
 }
 
 // =====================================================
@@ -418,7 +380,7 @@ function PlatformOverview({
     {
       label: 'Client Inbound Leads',
       value: applications.length.toString(),
-      sub: 'Website application funnel',
+      sub: 'Marketing site signup funnel',
       sparkData: [2, 4, 3, 5, 4, 6, applications.length],
       color: '#06b6d4',
       trend: `${pendingApps.length} pending review`,
@@ -436,214 +398,124 @@ function PlatformOverview({
   ]
 
   return (
-    <div className="space-y-7">
-      {/* Sleek Obsidian Enterprise Hero Banner */}
-      <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 shadow-xl text-white p-7">
-        <div
-          className="absolute inset-0 opacity-15 pointer-events-none"
-          style={{
-            backgroundImage: `radial-gradient(#6366f1 1px, transparent 1px)`,
-            backgroundSize: '24px 24px',
-          }}
-        />
-        <div className="absolute right-0 top-0 w-[500px] h-[300px] bg-gradient-to-bl from-indigo-500/10 via-purple-500/5 to-transparent blur-3xl pointer-events-none" />
-
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2 max-w-2xl">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold tracking-wider uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                LIVE MULTI-TENANT CLUSTER
-              </span>
-              <span className="text-slate-600 text-xs">•</span>
-              <span className="text-[11px] font-mono text-slate-400">ISOLATION: DATABASE-PER-STORE</span>
-            </div>
-
-            <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-              Platform Command Center
-            </h2>
-            <p className="text-xs text-slate-300/80 leading-relaxed">
-              Super Admin master controls for provisioning tenant databases, reviewing inbound client leads from the
-              marketing website, monitoring cluster-wide GMV, and managing custom domain DNS routing.
-            </p>
-          </div>
-
-          {/* Quick Action Buttons */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <button
-              onClick={onOpenProvisionModal}
-              className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-white text-slate-950 hover:bg-slate-100 transition-all cursor-pointer shadow-md shadow-white/10 flex items-center gap-2"
-            >
-              <span>⊕</span>
-              <span>Provision Store</span>
-            </button>
-            <button
-              onClick={() => onSwitchView('applications')}
-              className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 transition-all cursor-pointer flex items-center gap-2"
-            >
-              <span>📋</span>
-              <span>Review Apps ({stats.pendingApplications})</span>
-            </button>
-            <button
-              onClick={() => onSwitchView('leads')}
-              className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition-all cursor-pointer flex items-center gap-2"
-            >
-              <span>👥</span>
-              <span>Client CRM</span>
-            </button>
-          </div>
+    <div className="stack">
+      <div className="page-head">
+        <div>
+          <p className="eyebrow">Live multi-tenant cluster</p>
+          <h1>Platform command center</h1>
+          <p className="sub">
+            Review marketing-site signups, provision tenant databases, and manage domain routing.
+          </p>
         </div>
-
-        {/* Live Cluster Micro-Telemetry Bar */}
-        <div className="relative z-10 mt-6 pt-5 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-mono">
-          <div>
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Master DB Status</p>
-            <p className="font-semibold text-emerald-400 mt-0.5">● Connected (orvexatech_master)</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Average API Latency</p>
-            <p className="font-semibold text-slate-200 mt-0.5">18ms (Cluster Health: 100%)</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Isolated Databases</p>
-            <p className="font-semibold text-indigo-400 mt-0.5">{stats.activeStores} Dedicated Schemas</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Client Onboarding</p>
-            <p className="font-semibold text-slate-200 mt-0.5">Website Funnel Active</p>
-          </div>
+        <div className="row wrap">
+          <button type="button" onClick={onOpenProvisionModal} className="btn btn-gold">
+            Provision store
+          </button>
+          <button type="button" onClick={() => onSwitchView('applications')} className="btn btn-primary">
+            Review apps ({stats.pendingApplications})
+          </button>
+          <button type="button" onClick={() => onSwitchView('leads')} className="btn btn-outline">
+            Client CRM
+          </button>
         </div>
       </div>
 
-      {/* KPI Cards with Smooth Sparklines */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-        {kpis.map((kpi) => (
+      <div className="callout ok">
+        <span className="pill leaf"><span className="dot" /> Master DB connected</span>
+        <span className="muted small">{stats.activeStores} isolated store databases · marketing funnel active</span>
+      </div>
+
+      <div className="grid cols-4">
+        {kpis.slice(0, 4).map((kpi, idx) => (
           <div
             key={kpi.label}
-            className="rounded-xl p-5 bg-white border border-slate-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-md transition-all flex flex-col justify-between group"
+            className={`card kpi${idx === 0 ? ' gold' : ''}`}
           >
             <div>
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">{kpi.label}</span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                  kpi.trendPositive
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    : 'bg-amber-50 text-amber-700 border-amber-200'
-                }`}>
-                  {kpi.trend}
-                </span>
+              <div className="kpi-label">{kpi.label}</div>
+              <div className="kpi-value">{kpi.value}</div>
+              <div className="kpi-foot">
+                <span className={`delta${kpi.trendPositive ? '' : ' down'}`}>{kpi.trend}</span>
+                <span>{kpi.sub}</span>
               </div>
-
-              <div className="flex items-baseline justify-between gap-2 mb-2">
-                <p className="text-2xl font-bold tracking-tight text-slate-900">{kpi.value}</p>
+              <div className="spark">
+                <Sparkline data={kpi.sparkData} color={idx === 0 ? '#12163a' : kpi.color} />
               </div>
-            </div>
-
-            <div className="pt-2 border-t border-slate-100 flex items-end justify-between">
-              <span className="text-[10px] text-slate-400 font-medium">{kpi.sub}</span>
-              <Sparkline data={kpi.sparkData} color={kpi.color} />
             </div>
           </div>
         ))}
       </div>
 
       {/* Two Column Layout: Active Tenants & Pending Applications */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Active Store Clusters Overview */}
-        <div className="lg:col-span-2 rounded-xl bg-white border border-slate-200/80 shadow-sm p-6 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+      <div className="grid cols-2-1">
+        <section className="card">
+          <div className="card-head">
             <div>
-              <h3 className="text-sm font-bold text-slate-900">Active Tenant Infrastructure</h3>
-              <p className="text-xs text-slate-400">Real-time status of isolated tenant stores & dedicated schemas</p>
+              <h3 className="card-title">Active tenant infrastructure</h3>
+              <p className="card-sub">Isolated stores and dedicated schemas</p>
             </div>
-            <button
-              onClick={() => onSwitchView('stores')}
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 transition-colors cursor-pointer"
-            >
-              View All ({tenants.length}) →
+            <button type="button" onClick={() => onSwitchView('stores')} className="btn btn-ghost btn-sm">
+              View all ({tenants.length})
             </button>
           </div>
-
-          <div className="divide-y divide-slate-100">
-            {tenants.map((t) => (
-              <div key={t.id} className="py-3.5 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-white text-xs shadow-xs flex-shrink-0" style={{ backgroundColor: t.theme.primaryColor || '#000' }}>
-                    {t.brandName.charAt(0)}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-slate-900 truncate">{t.brandName}</p>
-                    <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
-                      <span>{storeAddress(t.slug)}</span>
-                      <span>•</span>
-                      <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
-                        db: orvexa_tenant_{t.slug}
-                      </span>
+          <div className="card-body">
+            <div className="divide">
+              {tenants.map((t) => (
+                <div key={t.id} className="row between" style={{ padding: '12px 0' }}>
+                  <div className="row grow min-w-0">
+                    <span className="avatar" style={{ background: t.theme.primaryColor || 'var(--ink)' }}>
+                      {t.brandName.charAt(0)}
+                    </span>
+                    <div className="grow min-w-0">
+                      <p className="strong truncate">{t.brandName}</p>
+                      <p className="muted small mono">{storeAddress(t.slug)} · orvexa_tenant_{t.slug}</p>
                     </div>
                   </div>
+                  <div className="row">
+                    <span className="money">{formatPlanPrice(t.subscription.pricePerMonth)}</span>
+                    <a href={`/t/${t.slug}`} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
+                      Open
+                    </a>
+                  </div>
                 </div>
-
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-xs font-semibold text-slate-700">{formatPlanPrice(t.subscription.pricePerMonth)}</span>
-                  <a
-                    href={`/t/${t.slug}`}
-                    target="_blank"
-                    className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 transition-colors"
-                  >
-                    Open Store ↗
-                  </a>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Quick Review / Actions Panel */}
-        <div className="rounded-xl bg-white border border-slate-200/80 shadow-sm p-6 space-y-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-              <h3 className="text-sm font-bold text-slate-900">Pending Approvals</h3>
-              <span className="text-xs font-mono font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                {pendingApps.length} Queue
-              </span>
+              ))}
             </div>
+          </div>
+        </section>
 
+        <section className="card stack" style={{ padding: 0 }}>
+          <div className="card-head">
+            <div>
+              <h3 className="card-title">Pending approvals</h3>
+              <p className="card-sub">Marketing signup queue</p>
+            </div>
+            <span className="pill gold mono">{pendingApps.length}</span>
+          </div>
+          <div className="card-body stack">
             {pendingApps.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-2xl mb-2">✨</p>
-                <p className="text-xs font-semibold text-slate-700">All applications processed</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">No pending merchant requests.</p>
+              <div className="empty">
+                <p className="strong">All applications processed</p>
+                <p className="muted small">New forms from the marketing site appear here.</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {pendingApps.slice(0, 2).map((app) => (
-                  <div key={app.id} className="p-3 rounded-lg bg-slate-50 border border-slate-200/80 space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-bold text-slate-900">{app.brandName}</p>
-                      <span className="text-[10px] font-mono text-slate-500">{app.requestedSlug}</span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 truncate">{app.ownerEmail}</p>
+              pendingApps.slice(0, 3).map((app) => (
+                <div key={app.id} className="callout info" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+                  <div className="row between">
+                    <span className="strong">{app.brandName}</span>
+                    <span className="pill mono">{app.requestedSlug}</span>
                   </div>
-                ))}
-              </div>
+                  <span className="muted small">{app.ownerEmail}</span>
+                </div>
+              ))
             )}
-          </div>
-
-          <div className="pt-4 border-t border-slate-100 space-y-2">
-            <button
-              onClick={() => onSwitchView('applications')}
-              className="w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider bg-slate-950 text-white hover:bg-slate-800 transition-all cursor-pointer shadow-sm"
-            >
-              Review Application Queue ({pendingApps.length}) →
+            <button type="button" onClick={() => onSwitchView('applications')} className="btn btn-primary" style={{ width: '100%' }}>
+              Review queue ({pendingApps.length})
             </button>
-            <button
-              onClick={() => onSwitchView('leads')}
-              className="w-full py-2 rounded-lg text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-all cursor-pointer border border-indigo-200"
-            >
-              Open Client Acquisition CRM
+            <button type="button" onClick={() => onSwitchView('leads')} className="btn btn-outline" style={{ width: '100%' }}>
+              Client acquisition CRM
             </button>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   )
@@ -653,7 +525,7 @@ function PlatformOverview({
 // 2. Application Queue
 // =====================================================
 function ApplicationQueue() {
-  const { applications, approve, reject } = useAdminApplications()
+  const { applications, syncError, syncing, approve, reject, refresh } = useAdminApplications()
   const [provisionMessage, setProvisionMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -662,6 +534,7 @@ function ApplicationQueue() {
   const pending = applications.filter((a) => a.status === 'pending')
   const waitlist = applications.filter((a) => a.status === 'waitlist')
   const processed = applications.filter((a) => a.status === 'approved' || a.status === 'rejected')
+  const websitePending = pending.filter((a) => a.channel === 'website')
 
   const handleReject = async (id: string) => {
     setBusyId(id)
@@ -713,18 +586,35 @@ function ApplicationQueue() {
         </div>
       )}
 
-      <div className="flex gap-2 text-xs">
-        <button
-          onClick={() => setTab('live')}
-          className={`px-3 py-1.5 rounded-lg font-medium cursor-pointer transition-colors ${tab === 'live' ? 'bg-slate-900 text-white font-bold' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-        >
-          Store Applications ({pending.length})
+      <div className="page-head">
+        <div>
+          <h1>Merchant applications</h1>
+          <p className="sub">
+            Forms from marketing-site-orvexacloud land here for approve or reject.
+            {websitePending.length > 0 ? ` ${websitePending.length} from the marketing site awaiting review.` : ''}
+            {syncing ? ' Syncing…' : ''}
+          </p>
+        </div>
+        <button type="button" className="btn btn-outline btn-sm" onClick={() => refresh()}>
+          Refresh queue
         </button>
-        <button
-          onClick={() => setTab('waitlist')}
-          className={`px-3 py-1.5 rounded-lg font-medium cursor-pointer transition-colors ${tab === 'waitlist' ? 'bg-slate-900 text-white font-bold' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-        >
-          Early-Access Waitlist ({waitlist.length})
+      </div>
+
+      {syncError && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 px-5 py-3.5 rounded-xl text-xs font-semibold flex items-center justify-between gap-3">
+          <span>{syncError}</span>
+          <button type="button" onClick={() => refresh()} className="text-amber-700 hover:text-amber-900 cursor-pointer underline">
+            Retry
+          </button>
+        </div>
+      )}
+
+      <div className="tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={tab === 'live'} className="tab" onClick={() => setTab('live')}>
+          Store applications <span className="count">{pending.length}</span>
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'waitlist'} className="tab" onClick={() => setTab('waitlist')}>
+          Early-access waitlist <span className="count">{waitlist.length}</span>
         </button>
       </div>
 
@@ -775,7 +665,7 @@ function ApplicationQueue() {
           <div className="bg-white rounded-xl p-12 border border-slate-200/80 text-center shadow-xs">
             <p className="text-3xl mb-2">🎉</p>
             <p className="text-sm font-bold text-slate-800">No Pending Applications</p>
-            <p className="text-xs text-slate-400 mt-1">All incoming merchant applications from the website have been reviewed.</p>
+            <p className="text-xs text-slate-400 mt-1">New forms from marketing-site-orvexacloud appear here for approval.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

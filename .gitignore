@@ -11,6 +11,11 @@ server/.env
 server/dist/
 src/tenants/**/*.env
 
+# Separate marketing-site clone (own git remote). Do not nest-commit it here.
+marketing-site-orvexatechcloud/
+marketing-site-orvexacloud/
+_agent_probe.txt
+
 .vite/
 vite.config.*.timestamp-*
 *.tsbuildinfo

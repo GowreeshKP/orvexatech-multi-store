@@ -122,6 +122,7 @@ export default function DashboardApp() {
   const [session, setSession] = useState<SellerSession | null>(() => authService.getSellerSession())
   const [activeView, setActiveView] = useState<DashboardView>('overview')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [navOpen, setNavOpen] = useState(false)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   const showToast = (msg: string) => {
@@ -133,6 +134,28 @@ export default function DashboardApp() {
     authService.logoutSeller()
     setSession(null)
   }
+
+  // Store APIs (products, analytics) need a JWT. Tokenless demo sessions only work offline.
+  useEffect(() => {
+    if (!session) return
+    let cancelled = false
+    void (async () => {
+      const token = await authService.getStoreAccessToken()
+      if (cancelled || token) return
+      try {
+        const health = await fetch('/api/health')
+        if (!cancelled && health.ok) {
+          authService.logoutSeller()
+          setSession(null)
+        }
+      } catch {
+        // API offline — keep local demo session.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [session])
 
   if (loading) {
     return (
@@ -161,176 +184,102 @@ export default function DashboardApp() {
   }
 
   return (
-    <div className="min-h-screen flex font-sans antialiased text-black" style={{ background: '#f1f0ef' }}>
-      {/* Toast Notification */}
+    <div className="shell">
       {toastMessage && (
-        <div
-          className="fixed top-5 right-5 z-50 text-white px-5 py-3.5 text-xs font-bold tracking-wider uppercase flex items-center gap-3 animate-slide-down"
-          style={{ background: 'rgba(0,0,0,0.92)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '10px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
-        >
-          <span className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-[10px] font-black flex-shrink-0">✓</span>
-          <span>{toastMessage}</span>
+        <div className="toasts">
+          <div className="toast">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6 9 17l-5-5" /></svg>
+            {toastMessage}
+          </div>
         </div>
       )}
 
-      {/* Sidebar */}
-      <aside
-        className={`${sidebarCollapsed ? 'w-[68px]' : 'w-64'} flex flex-col transition-all duration-300 flex-shrink-0 z-30 scroll-styled-dark`}
-        style={{ background: 'linear-gradient(180deg, #0c0c14 0%, #111118 50%, #0a0a10 100%)', borderRight: '1px solid rgba(255,255,255,0.06)' }}
-      >
-        {/* Brand Header */}
-        <div className={`h-16 flex items-center gap-3 flex-shrink-0 ${sidebarCollapsed ? 'px-3 justify-center' : 'px-4'}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-          {tenant?.logo || tenant?.theme?.logoUrl ? (
-            <img
-              src={tenant.logo || tenant.theme?.logoUrl}
-              alt=""
-              className="h-8 w-8 object-contain rounded-lg flex-shrink-0"
-              style={{ border: '1px solid rgba(255,255,255,0.1)' }}
-            />
-          ) : (
-            <div
-              className="w-8 h-8 rounded-lg text-white flex items-center justify-center text-xs font-black shadow-lg flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}
-            >
-              {tenant?.brandName?.charAt(0) || 'S'}
-            </div>
-          )}
+      {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} aria-hidden />}
+      <aside className={`sidebar${navOpen ? ' open' : ''}`} style={sidebarCollapsed ? { width: 76 } : undefined}>
+        <div className="brand-row">
+          <img src="/brand/logo-white.svg" alt="Orvexa" style={{ height: 28 }} />
+          {!sidebarCollapsed && <span className="portal-chip">Merchant</span>}
+        </div>
+
+        <div className="store-card">
+          <span className="avatar sm" style={{ background: 'var(--gold)', color: 'var(--ink)' }}>
+            {tenant?.brandName?.charAt(0) || 'S'}
+          </span>
           {!sidebarCollapsed && (
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-white truncate">{tenant?.brandName || 'My Store'}</p>
-              <p className="text-[10px] font-mono uppercase tracking-wider truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                {tenant?.ownerName || session.name}
-              </p>
+            <div className="grow min-w-0">
+              <p className="nm truncate">{tenant?.brandName || 'My Store'}</p>
+              <p className="sub truncate">{tenant?.ownerName || session.name}</p>
             </div>
           )}
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="text-xs cursor-pointer p-1.5 rounded-md transition-all flex-shrink-0"
-            style={{ color: 'rgba(255,255,255,0.3)', background: 'transparent' }}
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            onMouseEnter={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.7)')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.3)')}
-          >
+          <button type="button" className="btn btn-ghost btn-icon" style={{ color: 'var(--on-ink-2)' }} onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? 'Expand' : 'Collapse'}>
             {sidebarCollapsed ? '→' : '←'}
           </button>
         </div>
 
-        {/* Nav Items */}
-        <nav className="flex-1 py-4 px-2 space-y-0.5 overflow-y-auto scroll-styled-dark">
+        <p className="nav-group">{!sidebarCollapsed && 'Store'}</p>
+        <nav className="col" style={{ gap: 4 }}>
           {NAV_ITEMS.map((item) => {
             const isActive = activeView === item.id
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveView(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer relative ${
-                  sidebarCollapsed ? 'justify-center' : ''
-                }`}
-                style={isActive ? {
-                  background: 'linear-gradient(90deg, rgba(139,92,246,0.25) 0%, rgba(99,102,241,0.12) 100%)',
-                  borderLeft: '3px solid #8b5cf6',
-                  color: 'white',
-                  borderRadius: '0 8px 8px 0',
-                } : {
-                  borderLeft: '3px solid transparent',
-                  color: 'rgba(255,255,255,0.4)',
-                  borderRadius: '0 8px 8px 0',
+                type="button"
+                onClick={() => {
+                  setActiveView(item.id)
+                  setNavOpen(false)
                 }}
-                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'rgba(255,255,255,0.8)' } }}
-                onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'rgba(255,255,255,0.4)' } }}
+                className={`nav-item${isActive ? ' active' : ''}`}
+                title={item.label}
               >
-                <span className="text-base flex-shrink-0">{item.icon}</span>
-                {!sidebarCollapsed && <span>{item.label}</span>}
-                {isActive && !sidebarCollapsed && (
-                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0" />
-                )}
+                <span aria-hidden>{item.icon}</span>
+                {!sidebarCollapsed && <span className="grow">{item.label}</span>}
               </button>
             )
           })}
         </nav>
 
-        {/* Quick Links & Sign Out */}
-        <div className="p-3 space-y-1 flex-shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-          <a
-            href={tenantPortalPath(tenant?.slug || '')}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`flex items-center gap-2 text-[11px] font-bold tracking-wider px-3 py-2.5 rounded-lg transition-all ${
-              sidebarCollapsed ? 'justify-center' : ''
-            }`}
-            style={{ color: 'rgba(255,255,255,0.4)' }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.85)'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,255,255,0.4)'; e.currentTarget.style.background = 'transparent' }}
-          >
-            <span>🌐</span>
-            {!sidebarCollapsed && <span>Live Storefront ↗</span>}
+        <div className="sidebar-foot">
+          <a href={tenantPortalPath(tenant?.slug || '')} target="_blank" rel="noopener noreferrer" className="nav-item">
+            <span aria-hidden>🌐</span>
+            {!sidebarCollapsed && <span>Live storefront</span>}
           </a>
-          <button
-            onClick={handleLogout}
-            className={`w-full flex items-center gap-2 text-[11px] font-bold px-3 py-2.5 rounded-lg transition-all cursor-pointer ${
-              sidebarCollapsed ? 'justify-center' : ''
-            }`}
-            style={{ color: 'rgba(239,68,68,0.7)' }}
-            title="Sign Out"
-            onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = 'rgba(239,68,68,0.08)' }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'rgba(239,68,68,0.7)'; e.currentTarget.style.background = 'transparent' }}
-          >
-            <span>🚪</span>
-            {!sidebarCollapsed && <span>Sign Out</span>}
+          <button type="button" onClick={handleLogout} className="nav-item" style={{ color: 'var(--coral)' }}>
+            <span aria-hidden>🚪</span>
+            {!sidebarCollapsed && <span>Sign out</span>}
           </button>
         </div>
       </aside>
 
-      {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto min-w-0 flex flex-col scroll-styled">
-        {/* Top Bar */}
-        <header className="h-16 flex items-center justify-between px-6 sticky top-0 z-20" style={{ background: 'rgba(241,240,239,0.85)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
-          <div className="flex items-center gap-3">
-            <h1 className="text-base font-bold text-black">
-              {NAV_ITEMS.find((n) => n.id === activeView)?.label || 'Seller Portal'}
-            </h1>
-            <span className="hidden sm:inline-block text-xs" style={{ color: 'rgba(0,0,0,0.2)' }}>|</span>
-            <span className="hidden sm:inline-block text-xs font-mono" style={{ color: 'rgba(0,0,0,0.4)' }}>
-              {tenant?.brandName} ({storeAddress(tenant?.slug || '')})
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={() => switchLayer('storefront', tenant?.slug || 'lunar')}
-              className="text-xs font-bold px-3.5 py-2 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-white"
-              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 2px 10px rgba(99,102,241,0.3)' }}
-              title="View your live storefront"
-            >
-              <span>🏬</span>
-              <span className="hidden sm:inline">Open Storefront ↗</span>
+      <div className="min-w-0 flex flex-col min-h-screen">
+        <header className="topbar">
+          <button type="button" className="menu-btn btn btn-outline btn-icon" onClick={() => setNavOpen(true)} aria-label="Open menu">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+          </button>
+          <span className="crumb">Merchant</span>
+          <span className="muted">/</span>
+          <strong style={{ fontFamily: 'var(--font-display)' }}>{NAV_ITEMS.find((n) => n.id === activeView)?.label || 'Dashboard'}</strong>
+          <span className="muted small mono hidden sm:inline">{tenant?.brandName} · {storeAddress(tenant?.slug || '')}</span>
+          <div className="right row" style={{ gap: 8 }}>
+            <button type="button" className="btn btn-gold btn-sm" onClick={() => switchLayer('storefront', tenant?.slug || 'lunar')}>
+              Open storefront
             </button>
-            <button
-              onClick={handleLogout}
-              className="text-xs font-semibold px-3 py-2 rounded-lg transition-all flex items-center gap-1.5 border cursor-pointer"
-              style={{ background: 'white', color: 'rgba(0,0,0,0.7)', border: '1px solid rgba(0,0,0,0.1)' }}
-            >
-              <span>🚪</span>
-              <span className="hidden sm:inline">Sign Out</span>
-            </button>
-            <span className="badge-active">
-              {tenant?.status || 'Active'}
-            </span>
+            <span className="pill leaf">{tenant?.status || 'Active'}</span>
           </div>
         </header>
 
-        {/* Page View Switcher */}
-        <div className="p-6 md:p-8 flex-1">
-          {activeView === 'overview' && <DashboardOverview onNavigate={(view) => setActiveView(view)} />}
-          {activeView === 'products' && <ProductManager onToast={showToast} />}
-          {activeView === 'orders' && <OrderManager onToast={showToast} />}
-          {activeView === 'inbox' && <InboxManager onToast={showToast} />}
-          {activeView === 'storefront' && <StorefrontCustomizer onToast={showToast} />}
-          {activeView === 'database' && <DatabaseManager onToast={showToast} />}
-          {activeView === 'audit' && tenant && <StoreAuditLogs tenant={tenant} onToast={showToast} />}
-          {activeView === 'settings' && <StoreSettings onNavigate={(view) => setActiveView(view)} onToast={showToast} />}
-        </div>
-      </main>
+        <main className="main">
+          <div className="page">
+            {activeView === 'overview' && <DashboardOverview onNavigate={(view) => setActiveView(view)} />}
+            {activeView === 'products' && <ProductManager onToast={showToast} />}
+            {activeView === 'orders' && <OrderManager onToast={showToast} />}
+            {activeView === 'inbox' && <InboxManager onToast={showToast} />}
+            {activeView === 'storefront' && <StorefrontCustomizer onToast={showToast} />}
+            {activeView === 'database' && <DatabaseManager onToast={showToast} />}
+            {activeView === 'audit' && tenant && <StoreAuditLogs tenant={tenant} onToast={showToast} />}
+            {activeView === 'settings' && <StoreSettings onNavigate={(view) => setActiveView(view)} onToast={showToast} />}
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

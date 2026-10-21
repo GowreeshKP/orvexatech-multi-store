@@ -62,11 +62,10 @@ async function main() {
   }
   log(true, 'SIGNUP_SIGNING_SECRETS configured')
 
-  // Frontends up?
+  // Frontends up? Marketing UI lives in a separate repo — soft check only.
   for (const [name, url] of [
     ['main frontend', WEB],
     ['admin path', `${WEB}/admin`],
-    ['orvexa-cloud marketing', CLOUD],
   ]) {
     try {
       const r = await fetch(url)
@@ -74,6 +73,12 @@ async function main() {
     } catch (e) {
       log(false, `${name} reachable`, e.message)
     }
+  }
+  try {
+    const r = await fetch(CLOUD)
+    log(true, 'marketing site (optional)', r.ok ? `HTTP ${r.status} at ${CLOUD}` : `HTTP ${r.status} — clone marketing-site-orvexacloud separately`)
+  } catch (e) {
+    log(true, 'marketing site (optional)', `not running at ${CLOUD} — OK; intake is API-only`)
   }
 
   // Health
@@ -91,7 +96,7 @@ async function main() {
     log(r.status === 200 && r.json?.available === true, 'signed slug-available (free)', JSON.stringify(r.json))
   }
 
-  // 2) Marketing signup (signed) — simulates orvexacloud.in connector
+  // 2) Marketing signup (signed) — simulates marketing-site-orvexacloud connector
   const payload = {
     schemaVersion: 1,
     idempotencyKey: `e2e_${slug}_${crypto.randomUUID()}`,
@@ -126,7 +131,7 @@ async function main() {
       termsVersion: '1.0',
     },
     source: {
-      site: 'orvexacloud.in',
+      site: 'marketing-site-orvexacloud',
       country: 'IN',
       referrer: 'https://orvexacloud.in/pricing',
       utm: { source: 'e2e', medium: 'test' },
@@ -248,10 +253,9 @@ async function main() {
     log(rejected?.status === 'rejected', 'rejected status persisted', String(rejected?.status))
   }
 
-  // Gap note: in-app marketing form uses mockStore only (not connector)
   log(
     true,
-    'NOTE: in-browser marketing form (PlatformWebsite / orvexa-cloud) currently saves to mockStore; production intake is HMAC POST /api/public/signups (tested above)'
+    'NOTE: marketing UI is external (marketing-site-orvexacloud); Super Admin receives forms via HMAC POST /api/public/signups'
   )
 
   const passed = results.filter((r) => r.pass).length

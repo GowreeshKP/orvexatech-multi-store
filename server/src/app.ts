@@ -112,11 +112,11 @@ export function createApp() {
     message: { error: 'Too many requests. Please slow down and try again later.' },
   })
 
-  // Credential endpoints — 10 attempts / 15 min per IP (refresh/logout are not counted)
+  // Credential endpoints — tighter in production; looser locally so approve/login testing is not blocked.
   const authLimiter = rateLimit({
     skip,
     windowMs: 15 * 60 * 1000,
-    max: 10,
+    max: process.env.NODE_ENV === 'production' ? 10 : 200,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many login attempts. Please wait 15 minutes before trying again.' },

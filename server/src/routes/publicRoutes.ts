@@ -1,7 +1,7 @@
 // --- Public Signup Connector API (version 1) ---
-// Receives store applications from the marketing site's connector (orvexacloud.in).
-// Contract: docs/SUPER_ADMIN_API.md in the developer handoff. Every request is HMAC-signed;
-// the signature covers the raw body bytes, so this router must be mounted before express.json().
+// Receives store applications from marketing-site-orvexacloud (HMAC-signed).
+// Hand-off: docs/MARKETING_SIGNUP_CONNECTOR.md. The signature covers raw body bytes, so this
+// router must be mounted before express.json().
 //
 //   POST /api/public/signups          signed store application  -> 201 { applicationId, status }
 //   GET  /api/public/slug-available   signed availability check -> 200 { available }
@@ -24,7 +24,7 @@ import { hostLookupKeys, isPlatformHost, normalizeHostname } from '../lib/hosts.
 const router = Router()
 
 const SIGNATURE_MAX_AGE_SECONDS = 300
-const DB_DEADLINE_MS = 4000
+const DB_DEADLINE_MS = 15000
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 

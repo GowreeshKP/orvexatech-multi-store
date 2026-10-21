@@ -32,7 +32,6 @@ export default function AdminLogin({ onSuccess }: { onSuccess: (session: AdminSe
   const [now, setNow] = useState(Date.now())
 
   const secondsLocked = Math.max(0, Math.ceil((lock.lockedUntil - now) / 1000))
-
   const isLocked = secondsLocked > 0
 
   useEffect(() => {
@@ -93,75 +92,86 @@ export default function AdminLogin({ onSuccess }: { onSuccess: (session: AdminSe
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-sans antialiased">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-slate-900 ring-1 ring-white/10 flex items-center justify-center text-lg font-black shadow-lg">
-            <span className="bg-gradient-to-tr from-amber-400 to-indigo-400 bg-clip-text text-transparent">O</span>
-          </div>
-          <h1 className="mt-4 text-xl font-semibold text-white tracking-tight">Orvexa Admin Portal</h1>
-          <p className="mt-1 text-xs text-slate-400">Restricted access — authorized administrator only</p>
+    <div className="auth">
+      <aside className="auth-side">
+        <img className="logo" src="/brand/logo-white.svg" alt="Orvexa Cloud" />
+        <div>
+          <h2>
+            Run every store from one <em>command centre</em>.
+          </h2>
+          <p>Review marketing signups, provision isolated tenant databases, and keep billing and domains under control.</p>
         </div>
-
-        <form onSubmit={handleSubmit} className="bg-slate-900/80 border border-white/10 rounded-2xl p-6 space-y-4 shadow-2xl">
+        <div className="auth-points">
           <div>
-            <label htmlFor="admin-login-id" className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-              Admin Email
-            </label>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M20 6 9 17l-5-5" /></svg>
+            Marketing form intake → pending approvals
+          </div>
+          <div>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M20 6 9 17l-5-5" /></svg>
+            Database-per-store isolation
+          </div>
+          <div>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M20 6 9 17l-5-5" /></svg>
+            Super Admin only — restricted access
+          </div>
+        </div>
+        <img className="mark-bg" src="/brand/logo-white.svg" alt="" aria-hidden />
+      </aside>
+
+      <div className="auth-main">
+        <form className="auth-card" onSubmit={handleSubmit}>
+          <div>
+            <p className="eyebrow">Super Admin</p>
+            <h1>Sign in</h1>
+            <p className="muted" style={{ marginTop: 6 }}>Authorized administrators only.</p>
+          </div>
+
+          <label className="field">
+            <span className="label">Admin email</span>
             <input
               id="admin-login-id"
+              className="input"
               type="text"
               autoComplete="username"
               required
               autoFocus
               value={loginId}
               onChange={(e) => setLoginId(e.target.value)}
-              className="w-full bg-slate-950 border border-white/10 rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-slate-600 outline-none focus:border-indigo-500"
               placeholder="you@company.com"
             />
-          </div>
+          </label>
 
-          <div>
-            <label htmlFor="admin-password" className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-              Password
-            </label>
-            <div className="relative">
+          <label className="field">
+            <span className="label">Password</span>
+            <div className="row" style={{ gap: 8 }}>
               <input
                 id="admin-password"
+                className="input grow"
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-950 border border-white/10 rounded-lg px-3.5 py-2.5 pr-16 text-sm text-white placeholder-slate-600 outline-none focus:border-indigo-500"
                 placeholder="••••••••"
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-slate-400 hover:text-white px-2 py-1 cursor-pointer"
-              >
+              <button type="button" className="btn btn-outline btn-sm" onClick={() => setShowPassword((v) => !v)}>
                 {showPassword ? 'Hide' : 'Show'}
               </button>
             </div>
-          </div>
+          </label>
 
           {(error || secondsLocked > 0) && (
-            <p role="alert" className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">
+            <p role="alert" className="error">
               {secondsLocked > 0 ? `Too many failed attempts. Try again in ${secondsLocked}s.` : error}
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={submitting || secondsLocked > 0}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg py-2.5 transition-colors cursor-pointer"
-          >
-            {submitting ? 'Verifying…' : 'Sign In'}
+          <button type="submit" className="btn btn-primary btn-lg" disabled={submitting || secondsLocked > 0} style={{ width: '100%' }}>
+            {submitting ? 'Verifying…' : 'Sign in'}
           </button>
-        </form>
 
-        <p className="mt-6 text-center text-[11px] text-slate-600">© {new Date().getFullYear()} Orvexa Tech Private Limited</p>
+          <p className="center muted small">© {new Date().getFullYear()} Orvexa Tech Private Limited</p>
+        </form>
       </div>
     </div>
   )

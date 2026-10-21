@@ -5,9 +5,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTenant } from '@/context/TenantContext'
 import { mockStore } from '@/api/mock-store'
 import { authService } from '@/api/auth'
+import { apiClient } from '@/api/client'
 import { createStoreFolder } from '@/tenants/scaffold'
 import type { Product, Review, TrackedOrder } from '@/types'
 import type { TenantConfig, TenantApplication, PlatformStats, DashboardStats, ThemeConfig } from '@/types/tenant'
+import { normalizePlanId } from '@/data/plans'
 
 // =================================================================
 // STOREFRONT HOOKS (scoped to current tenant)
@@ -60,16 +62,17 @@ export function useTenantOrders(): {
   const refresh = useCallback(() => {
     if (!tenant) return
     const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
-    const token = authService.getSellerToken()
-    fetch(`${API_BASE}/stores/${encodeURIComponent(tenant.slug)}/orders`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (Array.isArray(data)) setOrders(data)
-        else setOrders([...mockStore.getOrders(tenant.id)])
+    void authService.getStoreAccessToken().then((token) =>
+      fetch(`${API_BASE}/stores/${encodeURIComponent(tenant.slug)}/orders`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
-      .catch(() => setOrders([...mockStore.getOrders(tenant.id)]))
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (Array.isArray(data)) setOrders(data)
+          else setOrders([...mockStore.getOrders(tenant.id)])
+        })
+        .catch(() => setOrders([...mockStore.getOrders(tenant.id)]))
+    )
   }, [tenant])
 
   useEffect(() => {
@@ -87,15 +90,16 @@ export function useTenantOrders(): {
     if (!tenant) return
     mockStore.updateOrderStatus(tenant.id, orderId, status, courier, awb)
     const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
-    const token = authService.getSellerToken()
-    fetch(`${API_BASE}/stores/${encodeURIComponent(tenant.slug)}/orders/${encodeURIComponent(orderId)}/status`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ status, courier, awb }),
-    }).catch(() => undefined)
+    void authService.getStoreAccessToken().then((token) =>
+      fetch(`${API_BASE}/stores/${encodeURIComponent(tenant.slug)}/orders/${encodeURIComponent(orderId)}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ status, courier, awb }),
+      }).catch(() => undefined)
+    )
     refresh()
   }, [tenant, refresh])
 
@@ -132,9 +136,19 @@ export function useDashboardProducts(): {
   const [products, setProducts] = useState<Product[]>([])
 
   const refresh = useCallback(() => {
-    if (tenant) {
+    if (!tenant) return
+    setProducts([...mockStore.getProducts(tenant.id)])
+    void apiClient.getProducts(tenant.slug).then((list) => {
+      if (!Array.isArray(list)) return
+      // Mirror API catalog into the local tenant DB so storefront + dashboard stay aligned.
+      const dbProducts = mockStore.getProducts(tenant.id)
+      const byId = new Map(dbProducts.map((p) => [p.id, p]))
+      for (const p of list) {
+        if (byId.has(p.id)) mockStore.updateProduct(tenant.id, p.id, p)
+        else mockStore.addProduct(tenant.id, p)
+      }
       setProducts([...mockStore.getProducts(tenant.id)])
-    }
+    })
   }, [tenant])
 
   useEffect(() => {
@@ -142,24 +156,24 @@ export function useDashboardProducts(): {
   }, [refresh])
 
   const addProduct = useCallback((product: Product) => {
-    if (tenant) {
-      mockStore.addProduct(tenant.id, product)
-      refresh()
-    }
+    if (!tenant) return
+    mockStore.addProduct(tenant.id, product)
+    setProducts([...mockStore.getProducts(tenant.id)])
+    void apiClient.addProduct(tenant.slug, product).then(() => refresh())
   }, [tenant, refresh])
 
   const updateProduct = useCallback((id: number, data: Partial<Product>) => {
-    if (tenant) {
-      mockStore.updateProduct(tenant.id, id, data)
-      refresh()
-    }
+    if (!tenant) return
+    mockStore.updateProduct(tenant.id, id, data)
+    setProducts([...mockStore.getProducts(tenant.id)])
+    void apiClient.updateProduct(tenant.slug, id, data).then(() => refresh())
   }, [tenant, refresh])
 
   const deleteProduct = useCallback((id: number) => {
-    if (tenant) {
-      mockStore.deleteProduct(tenant.id, id)
-      refresh()
-    }
+    if (!tenant) return
+    mockStore.deleteProduct(tenant.id, id)
+    setProducts([...mockStore.getProducts(tenant.id)])
+    void apiClient.deleteProduct(tenant.slug, id).then(() => refresh())
   }, [tenant, refresh])
 
   return { products, addProduct, updateProduct, deleteProduct, refresh }
@@ -199,6 +213,53 @@ export function useThemeCustomizer(): {
 // ADMIN HOOKS (Super Admin — platform owner)
 // =================================================================
 
+function fromBackendTenant(t: Record<string, any>): TenantConfig {
+  const theme = t.theme || {}
+  return {
+    id: t.id,
+    slug: t.slug,
+    brandName: t.brandName,
+    ownerName: t.ownerName || '',
+    ownerEmail: t.ownerEmail || '',
+    ownerPhone: t.ownerPhone || '',
+    logo: t.logo || '',
+    status: t.status || 'active',
+    plan: normalizePlanId(t.plan),
+    customDomain: t.customDomain || '',
+    customDomainVerified: Boolean(t.customDomainVerified),
+    customMongoUri: t.customMongoUri || undefined,
+    storeType: t.storeType || undefined,
+    niche: t.niche || '',
+    categories: t.categories || [],
+    createdAt: (t.createdAt || '').toString().slice(0, 10),
+    theme: {
+      primaryColor: theme.primaryColor || '#1F2937',
+      accentColor: theme.accentColor || '#6B7280',
+      backgroundColor: theme.backgroundColor || '#FAFAF8',
+      fontDisplay: theme.fontDisplay || "'Instrument Serif', Georgia, serif",
+      fontSans: theme.fontSans || "'Work Sans', system-ui, sans-serif",
+      heroImage: theme.heroImage || '',
+      heroHeadline: theme.heroHeadline || t.brandName || '',
+      heroSubhead: theme.heroSubhead || '',
+      heroCtaText: theme.heroCtaText || 'SHOP NOW →',
+      logoUrl: theme.logoUrl || t.logo || '',
+      announcementMessages: theme.announcementMessages || [],
+      enableAnimations: theme.enableAnimations !== false,
+      enableReviews: theme.enableReviews !== false,
+      enableOrderTracking: theme.enableOrderTracking !== false,
+    },
+    subscription: t.subscription || {
+      plan: normalizePlanId(t.plan),
+      pricePerMonth: 0,
+      status: 'trial',
+      nextBillingDate: '',
+      paymentMethod: 'razorpay',
+      invoices: [],
+    },
+    databaseConfig: t.databaseConfig,
+  }
+}
+
 export function useAdminTenants(): {
   tenants: TenantConfig[]
   suspend: (id: string) => void
@@ -226,11 +287,36 @@ export function useAdminTenants(): {
     setTenants([...mockStore.getAllTenants()])
   }, [])
 
+  const syncFromBackend = useCallback(async () => {
+    try {
+      const res = await adminApiFetch('/admin/tenants')
+      if (!res.ok) return
+      const remote = await res.json()
+      if (Array.isArray(remote)) {
+        mockStore.mergeTenants(remote.map(fromBackendTenant))
+        refresh()
+      }
+    } catch {
+      // Backend offline: keep local tenants.
+    }
+  }, [refresh])
+
   useEffect(() => {
     refresh()
-    window.addEventListener('orvexa:tenant-provisioned', refresh)
-    return () => window.removeEventListener('orvexa:tenant-provisioned', refresh)
-  }, [refresh])
+    syncFromBackend()
+    const onProvisioned = () => {
+      refresh()
+      void syncFromBackend()
+    }
+    window.addEventListener('orvexa:tenant-provisioned', onProvisioned)
+    window.addEventListener('focus', syncFromBackend)
+    const poll = window.setInterval(syncFromBackend, 30_000)
+    return () => {
+      window.removeEventListener('orvexa:tenant-provisioned', onProvisioned)
+      window.removeEventListener('focus', syncFromBackend)
+      window.clearInterval(poll)
+    }
+  }, [refresh, syncFromBackend])
 
   const suspend = useCallback((id: string) => {
     mockStore.suspendTenant(id)
@@ -383,38 +469,48 @@ async function sendApplicationDecision(
 
 export function useAdminApplications(): {
   applications: TenantApplication[]
+  syncError: string | null
+  syncing: boolean
   approve: (id: string, slug?: string) => Promise<{ tenant: TenantConfig | null; error?: string }>
   reject: (id: string, reviewNotes?: string) => Promise<{ error?: string }>
-  submitApplication: (appData: {
-    brandName: string
-    ownerName: string
-    ownerEmail: string
-    phone: string
-    niche: string
-    storeType?: string
-    categories?: string[]
-    requestedSlug: string
-    message?: string
-  }) => TenantApplication
   refresh: () => void
 } {
   const [applications, setApplications] = useState<TenantApplication[]>([])
+  const [syncError, setSyncError] = useState<string | null>(null)
+  const [syncing, setSyncing] = useState(false)
 
   const refresh = useCallback(() => {
     setApplications([...mockStore.getAllApplications()])
   }, [])
 
+  // Website applications arrive only via marketing-site-orvexacloud → POST /api/public/signups.
   const syncFromBackend = useCallback(async () => {
+    setSyncing(true)
     try {
+      const token = await authService.getValidAdminToken()
+      if (!token) {
+        setSyncError('Sign in again with the API online — marketing signups need a Super Admin token to load.')
+        return
+      }
       const res = await adminApiFetch('/admin/applications')
-      if (!res.ok) return
+      if (res.status === 401 || res.status === 403) {
+        setSyncError('Admin session expired. Sign out and sign in again to load marketing signups.')
+        return
+      }
+      if (!res.ok) {
+        setSyncError(`Could not load applications from the platform API (HTTP ${res.status}).`)
+        return
+      }
       const remote: BackendApplication[] = await res.json()
       if (Array.isArray(remote)) {
         mockStore.mergeApplications(remote.map(fromBackendApplication))
+        setSyncError(null)
         refresh()
       }
     } catch {
-      // Backend offline: keep showing the locally stored applications.
+      setSyncError('Platform API unreachable. Marketing signups will appear once the server on :5000 is online.')
+    } finally {
+      setSyncing(false)
     }
   }, [refresh])
 
@@ -422,16 +518,16 @@ export function useAdminApplications(): {
     refresh()
     syncFromBackend()
 
-    const handleNewApp = () => {
+    const handleChange = () => {
       refresh()
     }
-    window.addEventListener('orvexa:application-submitted', handleNewApp)
-    window.addEventListener('orvexa:applications-changed', handleNewApp)
+    window.addEventListener('orvexa:applications-changed', handleChange)
     window.addEventListener('focus', syncFromBackend)
+    const poll = window.setInterval(syncFromBackend, 15_000)
     return () => {
-      window.removeEventListener('orvexa:application-submitted', handleNewApp)
-      window.removeEventListener('orvexa:applications-changed', handleNewApp)
+      window.removeEventListener('orvexa:applications-changed', handleChange)
       window.removeEventListener('focus', syncFromBackend)
+      window.clearInterval(poll)
     }
   }, [refresh, syncFromBackend])
 
@@ -456,26 +552,12 @@ export function useAdminApplications(): {
     return {}
   }, [])
 
-  const submitApplication = useCallback(
-    (appData: {
-      brandName: string
-      ownerName: string
-      ownerEmail: string
-      phone: string
-      niche: string
-      storeType?: string
-      categories?: string[]
-      requestedSlug: string
-      message?: string
-    }) => {
-      const newApp = mockStore.submitApplication(appData)
-      refresh()
-      return newApp
-    },
-    [refresh]
-  )
+  const reload = useCallback(() => {
+    refresh()
+    void syncFromBackend()
+  }, [refresh, syncFromBackend])
 
-  return { applications, approve, reject, submitApplication, refresh }
+  return { applications, syncError, syncing, approve, reject, refresh: reload }
 }
 
 export function usePlatformStats(): { stats: PlatformStats | null; loading: boolean } {

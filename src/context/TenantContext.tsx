@@ -165,11 +165,23 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     const root = document.documentElement
     const t = tenant.theme
     if (t) {
-      root.style.setProperty('--brand-primary', t.primaryColor)
-      root.style.setProperty('--brand-accent', t.accentColor)
-      root.style.setProperty('--brand-bg', t.backgroundColor)
-      root.style.setProperty('--brand-font-display', t.fontDisplay)
-      root.style.setProperty('--brand-font-sans', t.fontSans)
+      root.style.setProperty('--brand-primary', t.primaryColor || '')
+      root.style.setProperty('--brand-accent', t.accentColor || '')
+      root.style.setProperty('--brand-bg', t.backgroundColor || '')
+      root.style.setProperty('--brand-font-display', t.fontDisplay || '')
+      root.style.setProperty('--brand-font-sans', t.fontSans || '')
+      // Storefront only: merchant fonts for headlines/buttons. Seller portal keeps Orvexa UI fonts.
+      if (layer === 'storefront') {
+        if (t.fontDisplay) {
+          root.style.setProperty('--font-display', t.fontDisplay)
+          root.style.setProperty('--font-serif', t.fontDisplay)
+        }
+        if (t.fontSans) {
+          root.style.setProperty('--font-sans', t.fontSans)
+          root.style.setProperty('--font-body', t.fontSans)
+          root.style.setProperty('--font-ui', t.fontSans)
+        }
+      }
     }
 
     if (layer === 'storefront') document.title = `${tenant.brandName} | Official Online Store`
@@ -181,6 +193,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       root.style.removeProperty('--brand-bg')
       root.style.removeProperty('--brand-font-display')
       root.style.removeProperty('--brand-font-sans')
+      root.style.removeProperty('--font-display')
+      root.style.removeProperty('--font-serif')
+      root.style.removeProperty('--font-sans')
+      root.style.removeProperty('--font-body')
+      root.style.removeProperty('--font-ui')
     }
   }, [tenant, layer])
 

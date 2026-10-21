@@ -4,16 +4,19 @@
 import type { Product, Review, TrackedOrder } from '@/types'
 import type { TenantConfig, ThemeConfig, PlatformStats, TenantApplication } from '@/types/tenant'
 import { mockStore } from './mock-store'
+import { authService } from './auth'
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api')
 
 class ApiClient {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T | null> {
     try {
+      const token = await authService.getStoreAccessToken()
       const res = await fetch(`${API_BASE_URL}${endpoint}`, {
         ...options,
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(options.headers || {}),
         },
       })
@@ -52,15 +55,23 @@ class ApiClient {
     })
 
     const tenant = mockStore.getTenantBySlug(tenantSlug)
-    if (tenant) {
-      const fullProduct: Product = {
-        ...product,
-        id: product.id || Date.now(),
-      }
-      mockStore.addProduct(tenant.id, fullProduct)
-      return data || fullProduct
+    const fullProduct: Product = data || {
+      ...product,
+      id: product.id || Date.now(),
     }
-    return (data as Product) || (product as Product)
+    if (tenant) {
+      // Prefer the server document; replace any optimistic local copy with the same client id.
+      const local = mockStore.getProducts(tenant.id)
+      if (product.id && local.some((p) => p.id === product.id) && fullProduct.id !== product.id) {
+        mockStore.deleteProduct(tenant.id, product.id)
+      }
+      if (!mockStore.getProducts(tenant.id).some((p) => p.id === fullProduct.id)) {
+        mockStore.addProduct(tenant.id, fullProduct)
+      } else {
+        mockStore.updateProduct(tenant.id, fullProduct.id, fullProduct)
+      }
+    }
+    return fullProduct
   }
 
   async updateProduct(tenantSlug: string, id: number, updates: Partial<Product>): Promise<Product | null> {

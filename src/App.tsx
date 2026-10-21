@@ -747,17 +747,18 @@ function Navigation({
   const featuredProduct = products[0] || null
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-black/8 transition-all">
-      <div className="max-w-screen-2xl mx-auto px-6 h-16 flex items-center justify-between">
+    <header className="sticky top-0 z-40 transition-all" style={{ background: 'color-mix(in srgb, var(--surface) 92%, transparent)', backdropFilter: 'blur(12px)', borderBottom: '1.5px solid var(--line)' }}>
+      <div className="max-w-screen-2xl mx-auto px-6 h-16 flex items-center justify-between" style={{ color: 'var(--ink)', fontFamily: 'var(--font-body)' }}>
         {/* Left: Mobile hamburger */}
         <button
-          className="md:hidden p-2 text-black cursor-pointer"
+          className="md:hidden p-2 cursor-pointer"
+          style={{ color: 'var(--ink)' }}
           onClick={onOpenMobileMenu}
           aria-label="Toggle Navigation Menu"
         >
-          <div className="w-5 h-0.5 bg-black mb-1" />
-          <div className="w-5 h-0.5 bg-black mb-1" />
-          <div className="w-5 h-0.5 bg-black" />
+          <div className="w-5 h-0.5 mb-1" style={{ background: 'var(--ink)' }} />
+          <div className="w-5 h-0.5 mb-1" style={{ background: 'var(--ink)' }} />
+          <div className="w-5 h-0.5" style={{ background: 'var(--ink)' }} />
         </button>
 
         {/* Brand Official Logo */}
@@ -5028,7 +5029,7 @@ function Footer({
     { label: 'FB', name: 'Facebook', href: social.facebook },
   ]
   return (
-    <footer className="text-white border-t border-white/10" style={{ background: 'linear-gradient(180deg, #0a0a0f 0%, #050508 100%)' }}>
+    <footer className="text-white border-t" style={{ background: 'var(--ink)', borderColor: 'var(--ink-3)', fontFamily: 'var(--font-body)' }}>
       {/* Trust Strip */}
       {showTrustStrip && (
       <div className="border-b border-white/8 py-6">
@@ -5242,19 +5243,22 @@ function renderSlot<K extends keyof StorefrontSlotProps>(
   return Custom ? <Custom {...p} Default={Default} /> : <Built {...p} />
 }
 
-/** CSS variables for theme values the store fixes in code (scoped to the storefront root). */
-function storeThemeStyle(storeModule: StoreModule | null): CSSProperties | undefined {
-  const t = storeModule?.theme
-  if (!t) return undefined
+/** CSS variables for the active tenant theme (scoped to the storefront root). */
+function tenantSurfaceStyle(tenant: TenantConfig, storeModule: StoreModule | null): CSSProperties {
+  const t = { ...tenant.theme, ...(storeModule?.theme || {}) }
   const vars: Record<string, string> = {}
   if (t.primaryColor) vars['--brand-primary'] = t.primaryColor
   if (t.accentColor) vars['--brand-accent'] = t.accentColor
   if (t.backgroundColor) vars['--brand-bg'] = t.backgroundColor
-  if (t.fontSans) vars['--brand-font-sans'] = t.fontSans
-  if (t.fontDisplay) {
-    vars['--brand-font-display'] = t.fontDisplay
-    vars['--font-display'] = t.fontDisplay
-  }
+  const display = t.fontDisplay || "'Instrument Serif', Georgia, serif"
+  const sans = t.fontSans || "'Work Sans', system-ui, sans-serif"
+  vars['--brand-font-display'] = display
+  vars['--brand-font-sans'] = sans
+  vars['--font-display'] = display
+  vars['--font-serif'] = display
+  vars['--font-sans'] = sans
+  vars['--font-body'] = sans
+  vars['--font-ui'] = sans
   return vars as CSSProperties
 }
 
@@ -5264,7 +5268,6 @@ function sectionsAfter(storeModule: StoreModule | null, position: StoreSection['
 
 export default function App() {
   const layer = useApplicationLayer()
-  const switchLayer = useSwitchLayer()
   const { tenant, loading: tenantLoading, error: tenantError } = useTenant()
 
   if (layer === 'admin') {
@@ -5290,7 +5293,13 @@ export default function App() {
     return <DashboardApp />
   }
 
-  const baseTenant: TenantConfig = tenant
+  // Storefront hooks live in TenantStorefront so early returns above never change hook order.
+  return <TenantStorefront tenant={tenant} />
+}
+
+function TenantStorefront({ tenant }: { tenant: TenantConfig }) {
+  const switchLayer = useSwitchLayer()
+  const baseTenant = tenant
   // Per-store frontend from src/tenants/<slug>/ (theme values, components, sections, CSS)
   const { module: storeModule, ready: storeReady } = useStoreModule(baseTenant.slug)
   const activeTenant = useMemo(() => applyStoreTheme(baseTenant, storeModule), [baseTenant, storeModule])
@@ -5611,7 +5620,7 @@ export default function App() {
     <StoreModuleContext.Provider value={storeModule}>
     <div
       data-store={activeTenant.slug}
-      style={storeThemeStyle(storeModule)}
+      style={tenantSurfaceStyle(activeTenant, storeModule)}
       className="min-h-screen bg-stone-50/20 text-black font-sans antialiased relative selection:bg-rose-100 selection:text-black"
     >
       {/* Dynamic Ambient Background & Interactive Breeze Simulation */}

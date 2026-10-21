@@ -48,7 +48,7 @@ export async function submitStorefrontOrder(
 }
 
 export async function fetchStoreAnalytics(slug: string, days = 7) {
-  const token = authService.getSellerToken()
+  const token = await authService.getStoreAccessToken()
   const res = await fetch(`${API_BASE}/stores/${encodeURIComponent(slug)}/analytics?days=${days}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
@@ -69,7 +69,7 @@ export async function fetchStoreAnalytics(slug: string, days = 7) {
 }
 
 export async function saveCustomDomain(slug: string, customDomain: string) {
-  const token = authService.getSellerToken()
+  const token = await authService.getStoreAccessToken()
   const res = await fetch(`${API_BASE}/stores/${encodeURIComponent(slug)}/domain`, {
     method: 'PUT',
     headers: {
@@ -84,7 +84,7 @@ export async function saveCustomDomain(slug: string, customDomain: string) {
 }
 
 export async function fetchDomainConfig(slug: string) {
-  const token = authService.getSellerToken()
+  const token = await authService.getStoreAccessToken()
   const res = await fetch(`${API_BASE}/stores/${encodeURIComponent(slug)}/domain`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })

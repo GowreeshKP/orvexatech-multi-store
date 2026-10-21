@@ -1,16 +1,93 @@
-/* Option 3 — Less "AI SaaS" typography
-   Headings : Neue Haas Grotesk (system) → Helvetica Neue → Arial
-   Body/UI  : Source Sans 3 (Google Fonts)
-*/
-@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Instrument+Serif:ital@0;1&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+/* Orvexa portals demo design system (Bricolage / Hanken / Plex Mono) */
+@import './styles/portals-demo.css';
 @import 'tailwindcss';
 
 @theme {
-  /* Neue Haas Grotesk — premium system font stack for all headings/display */
-  --font-display: 'Neue Haas Grotesk Display', 'Neue Haas Grotesk', 'Helvetica Neue', 'Arial Nova', Arial, sans-serif;
-  /* Source Sans 3 — clean humanist sans for body & UI chrome */
-  --font-sans: 'Source Sans 3', 'Helvetica Neue', Arial, sans-serif;
-  --font-ui: 'Source Sans 3', 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Bricolage Grotesque', 'Helvetica Neue', Arial, sans-serif;
+  /* font-serif utilities (headlines on storefronts) follow the active display face */
+  --font-serif: var(--font-display);
+  --font-sans: 'Hanken Grotesk', 'Bricolage Grotesque', 'Helvetica Neue', Arial, sans-serif;
+  --font-ui: 'Hanken Grotesk', 'Bricolage Grotesque', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+}
+
+/* Multi-tenant storefront surface: tenant theme fonts + readable CTA buttons */
+[data-store] {
+  font-family: var(--font-body, var(--font-sans));
+  --font-serif: var(--font-display);
+  color: #121212;
+}
+
+[data-store] button,
+[data-store] .btn,
+[data-store] [role='button'],
+[data-store] a.button {
+  font-family: var(--font-sans);
+}
+
+/* Light CTAs must not inherit text-white from dark hero parents */
+[data-store] button.bg-white,
+[data-store] a.bg-white,
+[data-store] .bg-white.cursor-pointer {
+  color: #111 !important;
+}
+
+[data-store] h1,
+[data-store] h2,
+[data-store] h3,
+[data-store] .font-serif {
+  font-family: var(--font-display);
+}
+
+/*
+ * Portal buttons (admin + seller). Tailwind preflight sets `button { color: inherit }`,
+ * which washes out gold/outline labels when a parent uses light text. Lock contrast here
+ * after Tailwind so platform / tenant admin controls stay readable.
+ */
+.shell .btn,
+.auth .btn {
+  font-family: var(--font-body, var(--font-sans));
+}
+.shell .btn-primary,
+.auth .btn-primary,
+.shell .btn.btn-primary,
+.auth .btn.btn-primary {
+  background: var(--ink, #12163a) !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
+}
+.shell .btn-gold,
+.auth .btn-gold,
+.shell .btn.btn-gold,
+.auth .btn.btn-gold {
+  background: var(--gold, #ffc21a) !important;
+  color: var(--ink, #12163a) !important;
+  border-color: var(--gold-edge, #e6b800) !important;
+}
+.shell .btn-outline,
+.auth .btn-outline,
+.shell .btn.btn-outline,
+.auth .btn.btn-outline {
+  background: #ffffff !important;
+  color: var(--ink, #12163a) !important;
+  border-color: var(--field-edge, #848ab4) !important;
+}
+.shell .btn-ghost,
+.auth .btn-ghost {
+  color: var(--ink-2, #353a63) !important;
+}
+.shell .btn-danger,
+.auth .btn-danger {
+  background: #ffffff !important;
+  color: var(--coral, #c92f36) !important;
+  border-color: var(--coral, #c92f36) !important;
+}
+.shell .sidebar .btn-ghost,
+.shell .sidebar .nav-item {
+  color: var(--on-ink-2, #b9bee6) !important;
+}
+.shell .sidebar .nav-item.active {
+  color: #ffffff !important;
 }
 
 * {
@@ -22,9 +99,9 @@ html {
 }
 
 body {
-  font-family: var(--font-sans);
-  background: #ffffff;
-  color: #0a0a0a;
+  font-family: var(--font-body, var(--font-sans));
+  background: var(--paper, #f4f5f9);
+  color: var(--ink, #12163a);
 }
 
 /* =========================================
@@ -641,11 +718,12 @@ body {
 }
 
 /* =========================================
-   BUTTON UTILITIES
+   STOREFRONT BUTTON UTILITIES
+   (scoped so they do not wash out portal .btn-primary / .btn-gold)
    ========================================= */
-.btn-primary {
+[data-store] .btn-primary {
   background: #000;
-  color: #fff;
+  color: #fff !important;
   font-weight: 700;
   font-size: 11px;
   letter-spacing: 0.18em;
@@ -655,12 +733,12 @@ body {
   cursor: pointer;
   border: 1px solid #000;
 }
-.btn-primary:hover { background: #1a1a1a; }
-.btn-primary:active { transform: scale(0.97); }
+[data-store] .btn-primary:hover { background: #1a1a1a; }
+[data-store] .btn-primary:active { transform: scale(0.97); }
 
-.btn-secondary {
+[data-store] .btn-secondary {
   background: transparent;
-  color: #000;
+  color: #000 !important;
   font-weight: 700;
   font-size: 11px;
   letter-spacing: 0.18em;
@@ -670,7 +748,7 @@ body {
   transition: all 0.2s;
   cursor: pointer;
 }
-.btn-secondary:hover { background: #f5f5f5; border-color: #000; }
+[data-store] .btn-secondary:hover { background: #f5f5f5; border-color: #000; }
 
 .btn-dark-sm {
   background: rgba(255,255,255,0.1);
