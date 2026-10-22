@@ -78,8 +78,11 @@
 *.ttf                filter=lfs diff=lfs merge=lfs -text
 *.otf                filter=lfs diff=lfs merge=lfs -text
 *.woff               filter=lfs diff=lfs merge=lfs -text
-*.woff2              filter=lfs diff=lfs merge=lfs -text
 *.eot                filter=lfs diff=lfs merge=lfs -text
+# Portal UI fonts must be real blobs (not LFS pointers) so Vite/Vercel
+# serve valid wOFF2. Pointer text decodes as sfntVersion "vers" and fails OTS.
+*.woff2              -text
+public/fonts/*.woff2 -text
 
 # ---------------------------------------------------------------------------
 # Data & Machine Learning
