@@ -6,6 +6,7 @@ import type { TenantConfig } from '@/types/tenant'
 import { MOCK_TENANTS } from '@/data/mock-tenants'
 import { mockStore } from '@/api/mock-store'
 import { auditLogger } from '@/api/audit-logger'
+import { API_BASE } from '@/api/base'
 
 export interface SellerSession {
   userId: string
@@ -89,8 +90,6 @@ const ADMIN_SESSION_KEY = 'lunar_admin_session'
 const SELLER_TOKEN_KEY = 'lunar_seller_token'
 const ADMIN_TOKEN_KEY = 'lunar_admin_token'
 const STORE_CREDENTIALS_KEY = 'orvexa_store_credentials_v1'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 
 /**
  * Offline demo mode: local credential fallbacks and the browser-only credentials registry.

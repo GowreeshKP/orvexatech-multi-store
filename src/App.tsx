@@ -28,6 +28,7 @@ import StoreNotFound from './components/platform/StoreNotFound'
 import { submitStorefrontOrder, trackStorefrontEvent } from './api/storefront-analytics'
 import { storefrontUrl, sellerPortalUrl } from './lib/store-urls'
 import { apiClient } from './api/client'
+import { API_ORIGIN } from './api/base'
 
 // --- THE LUNAR CLOTHING OFFICIAL PRODUCT DATASET ---
 export interface Product {
@@ -3361,7 +3362,7 @@ function AuthModal({
     e.preventDefault()
     setSellerForgotError(null)
     setSellerForgotLoading(true)
-    const API_BASE = import.meta.env.VITE_API_URL || ''
+    const API_BASE = API_ORIGIN
     try {
       const res = await fetch(`${API_BASE}/api/auth/seller/forgot-password`, {
         method: 'POST',

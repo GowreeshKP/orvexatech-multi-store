@@ -11,6 +11,7 @@ import {
 } from '@/lib/tenant-resolver'
 import { mockStore } from '@/api/mock-store'
 import { DEMO_MODE } from '@/api/auth'
+import { API_BASE } from '@/api/base'
 
 function deepCloneTenant(config: TenantConfig): TenantConfig {
   return JSON.parse(JSON.stringify(config))
@@ -47,8 +48,6 @@ export function useApplicationLayer(): ApplicationLayer {
 export function useSwitchLayer() {
   return useContext(TenantContext).switchLayer
 }
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 
 async function fetchPublicTenant(slug: string): Promise<TenantConfig | null> {
   if (!slug) return null

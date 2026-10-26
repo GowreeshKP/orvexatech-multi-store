@@ -5,6 +5,7 @@
 import { useState, useCallback } from 'react'
 import { useAuth } from '@/hooks/useAuth'
 import { authService, DEFAULT_DEMO_SELLER_CREDENTIALS, DEMO_ADMIN_CREDENTIAL } from '@/api/auth'
+import { API_ORIGIN } from '@/api/base'
 
 interface Props {
   isOpen: boolean
@@ -30,7 +31,7 @@ export default function CommonLoginModal({ isOpen, onClose, onSuccess }: Props) 
   const [forgotError, setForgotError] = useState<string | null>(null)
   const [forgotResetToken, setForgotResetToken] = useState<string | null>(null)
 
-  const API_BASE = import.meta.env.VITE_API_URL || ''
+  const API_BASE = API_ORIGIN
 
   const handleLogin = useCallback(
     async (e: React.FormEvent) => {

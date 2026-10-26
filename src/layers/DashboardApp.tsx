@@ -4,6 +4,7 @@ import { useDashboardStats, useDashboardProducts, useTenantOrders, useThemeCusto
 import { authService, type SellerSession } from '@/api/auth'
 import { mockStore } from '@/api/mock-store'
 import { auditLogger } from '@/api/audit-logger'
+import { API_BASE } from '@/api/base'
 import { PLAN_CATALOG, formatPlanPrice, normalizePlanId, storeAddress } from '@/data/plans'
 import { tenantPortalPath } from '@/lib/store-urls'
 import { fetchStoreAnalytics, fetchDomainConfig, saveCustomDomain } from '@/api/storefront-analytics'
@@ -143,7 +144,7 @@ export default function DashboardApp() {
       const token = await authService.getStoreAccessToken()
       if (cancelled || token) return
       try {
-        const health = await fetch('/api/health')
+        const health = await fetch(`${API_BASE}/health`)
         if (!cancelled && health.ok) {
           authService.logoutSeller()
           setSession(null)
@@ -3069,7 +3070,6 @@ function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardV
       setOwnerPhone(tenant.ownerPhone || '')
 
       // Fetch staff from backend API if available
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
       fetch(`${API_BASE}/admin/tenants/${tenant.slug}/staff`)
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
@@ -3172,7 +3172,6 @@ function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardV
     setIsAddingStaff(true)
     setStaffMsg(null)
 
-    const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
     try {
       const res = await fetch(`${API_BASE}/admin/tenants/${tenant.slug}/staff`, {
         method: 'POST',
@@ -3214,7 +3213,6 @@ function StoreSettings({ onNavigate, onToast }: { onNavigate?: (view: DashboardV
   }
 
   const handleDeleteStaff = async (staffId: string) => {
-    const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
     try {
       await fetch(`${API_BASE}/admin/tenants/${tenant.slug}/staff/${staffId}`, {
         method: 'DELETE',
@@ -4085,7 +4083,7 @@ function DatabaseManager({ onToast }: { onToast: (msg: string) => void }) {
 
     try {
       // Call backend API to persist custom DB URI and DB Name
-      await fetch(`/api/stores/${tenant?.slug || 'lunar'}/database-config`, {
+      await fetch(`${API_BASE}/stores/${tenant?.slug || 'lunar'}/database-config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

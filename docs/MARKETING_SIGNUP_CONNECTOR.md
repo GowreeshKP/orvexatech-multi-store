@@ -27,8 +27,8 @@ This multi-store repo only **receives** signed applications and shows them under
 
 ```env
 SIGNUP_SIGNING_SECRETS=<same-secret>
-CORS_ORIGIN=http://localhost:8443,http://localhost:3000,https://orvexacloud.in,https://orvexacloud.vercel.app
-PUBLIC_APP_URL=https://orvexacloud.vercel.app
+CORS_ORIGIN=http://localhost:8443,http://localhost:3000,https://orvexacloud.in,https://app.orvexacloud.in
+PUBLIC_APP_URL=https://app.orvexacloud.in
 ```
 
 **Marketing site** — local `.env` and Cloudflare Worker secrets (connector signs server-side; secret never goes in the browser):
@@ -38,21 +38,22 @@ PUBLIC_APP_URL=https://orvexacloud.vercel.app
 SUPER_ADMIN_SIGNUP_URL=http://localhost:5000/api/public/signups
 SUPER_ADMIN_SLUG_CHECK_URL=http://localhost:5000/api/public/slug-available
 
-# Production (Render multi-tenant API)
-# SUPER_ADMIN_SIGNUP_URL=https://orvexa-api-nskw.onrender.com/api/public/signups
-# SUPER_ADMIN_SLUG_CHECK_URL=https://orvexa-api-nskw.onrender.com/api/public/slug-available
+# Production (Render multi-tenant API custom domain)
+# SUPER_ADMIN_SIGNUP_URL=https://api.orvexacloud.in/api/public/signups
+# SUPER_ADMIN_SLUG_CHECK_URL=https://api.orvexacloud.in/api/public/slug-available
 SUPER_ADMIN_SIGNING_SECRET=<same-secret-as-SIGNUP_SIGNING_SECRETS>
 CORS_ORIGINS=https://orvexacloud.in,http://localhost:3000
 SITE_URL=https://orvexacloud.in
 ```
 
-### Production checklist (multi-tenant off Cloudflare)
+### Production checklist (Cloudflare Pages UI + Render API)
 
 | Host | Action |
 |------|--------|
-| **Render** (`orvexa-api-nskw.onrender.com`) | Deploy code that includes `POST /api/public/signups`. Set `SIGNUP_SIGNING_SECRETS`, `CORS_ORIGIN` (include `https://orvexacloud.in`), `PUBLIC_APP_URL=https://orvexacloud.vercel.app`. Whitelist your IP / `0.0.0.0/0` on Atlas if signups return 503. |
-| **Cloudflare Worker** (`orvexacloud.in`) | Set secret `SUPER_ADMIN_SIGNING_SECRET`. Vars `SUPER_ADMIN_SIGNUP_URL` / `SUPER_ADMIN_SLUG_CHECK_URL` are in `wrangler.jsonc` pointing at Render. Redeploy Worker. Confirm `/api/public/config` returns `mode: "connected"`. |
-| **Vercel Admin** | Open `https://orvexacloud.vercel.app/admin` → Merchant Applications for pending forms. |
+| **Render** (`api.orvexacloud.in` → Blueprint `render.yaml`) | Deploy Express API. Set `SIGNUP_SIGNING_SECRETS`, `CORS_ORIGIN` (include `https://orvexacloud.in` + `https://app.orvexacloud.in`), `PUBLIC_APP_URL=https://app.orvexacloud.in`, JWT + Mongo URIs. Atlas Network Access: `0.0.0.0/0`. |
+| **Cloudflare Pages** (`app.orvexacloud.in`) | Build with `VITE_API_URL=https://api.orvexacloud.in`. CNAME `app` → `orvexatech-multi-store.pages.dev`. |
+| **Cloudflare Worker** (`orvexacloud.in`) | Set secret `SUPER_ADMIN_SIGNING_SECRET`. Vars `SUPER_ADMIN_SIGNUP_URL` / `SUPER_ADMIN_SLUG_CHECK_URL` point at `https://api.orvexacloud.in/...`. Redeploy Worker. Confirm `/api/public/config` returns `mode: "connected"`. |
+| **Admin UI** | Open `https://app.orvexacloud.in/admin` → Merchant Applications for pending forms. |
 
 Required headers on signup:
 

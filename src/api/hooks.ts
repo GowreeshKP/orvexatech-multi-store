@@ -10,6 +10,7 @@ import { createStoreFolder } from '@/tenants/scaffold'
 import type { Product, Review, TrackedOrder } from '@/types'
 import type { TenantConfig, TenantApplication, PlatformStats, DashboardStats, ThemeConfig } from '@/types/tenant'
 import { normalizePlanId } from '@/data/plans'
+import { API_BASE } from '@/api/base'
 
 // =================================================================
 // STOREFRONT HOOKS (scoped to current tenant)
@@ -61,7 +62,6 @@ export function useTenantOrders(): {
 
   const refresh = useCallback(() => {
     if (!tenant) return
-    const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
     void authService.getStoreAccessToken().then((token) =>
       fetch(`${API_BASE}/stores/${encodeURIComponent(tenant.slug)}/orders`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -89,7 +89,6 @@ export function useTenantOrders(): {
   const updateOrderStatus = useCallback((orderId: string, status: TrackedOrder['status'], courier?: string, awb?: string) => {
     if (!tenant) return
     mockStore.updateOrderStatus(tenant.id, orderId, status, courier, awb)
-    const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
     void authService.getStoreAccessToken().then((token) =>
       fetch(`${API_BASE}/stores/${encodeURIComponent(tenant.slug)}/orders/${encodeURIComponent(orderId)}/status`, {
         method: 'PUT',
@@ -349,7 +348,6 @@ export function useAdminTenants(): {
       customDomain?: string
     }): Promise<TenantConfig> => {
       const cleanSlug = data.slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
       const token = typeof window !== 'undefined' ? localStorage.getItem('lunar_admin_token') : null
 
       try {
@@ -388,7 +386,7 @@ export function useAdminTenants(): {
   return { tenants, suspend, reactivate, changePlan, provisionTenant, refresh }
 }
 
-const ADMIN_API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+const ADMIN_API_BASE = API_BASE
 
 // Shape of an Application document returned by GET /api/admin/applications.
 interface BackendApplication {

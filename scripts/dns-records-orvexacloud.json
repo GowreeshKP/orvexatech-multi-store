@@ -1,0 +1,23 @@
+{
+  "zone": "orvexacloud.in",
+  "note": "Add these in the Cloudflare account that owns orvexacloud.in (not the Pages-only account). Or run: CLOUDFLARE_API_TOKEN=... RENDER_HOSTNAME=<svc>.onrender.com node scripts/setup-cloudflare-dns.mjs",
+  "records": [
+    {
+      "type": "CNAME",
+      "name": "app",
+      "content": "orvexatech-multi-store.pages.dev",
+      "proxied": true,
+      "purpose": "Cloudflare Pages multi-store UI → https://app.orvexacloud.in"
+    },
+    {
+      "type": "CNAME",
+      "name": "api",
+      "content": "REPLACE_WITH_RENDER_HOSTNAME.onrender.com",
+      "proxied": false,
+      "purpose": "Render Express API → https://api.orvexacloud.in (set DNS-only until SSL issues, then can proxy)"
+    }
+  ],
+  "pages_project": "orvexatech-multi-store",
+  "pages_preview": "https://orvexatech-multi-store.pages.dev",
+  "custom_domain_status": "app.orvexacloud.in attached to Pages; pending DNS verification"
+}

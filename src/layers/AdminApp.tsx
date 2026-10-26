@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAdminTenants, useAdminApplications, usePlatformStats } from '@/api/hooks'
 import { authService, type AdminSession } from '@/api/auth'
 import { auditLogger } from '@/api/audit-logger'
+import { API_BASE } from '@/api/base'
 import AdminLogin from '@/components/auth/AdminLogin'
 import ResetPasswordModal from '@/components/auth/ResetPasswordModal'
 import StoreCredentialsModal from '@/components/auth/StoreCredentialsModal'
@@ -149,7 +150,7 @@ export default function AdminApp() {
       const token = await authService.getValidAdminToken()
       if (cancelled || token) return
       try {
-        const health = await fetch('/api/health')
+        const health = await fetch(`${API_BASE}/health`)
         if (!cancelled && health.ok) {
           authService.logoutAdmin()
           setSession(null)

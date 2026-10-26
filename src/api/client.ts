@@ -5,8 +5,7 @@ import type { Product, Review, TrackedOrder } from '@/types'
 import type { TenantConfig, ThemeConfig, PlatformStats, TenantApplication } from '@/types/tenant'
 import { mockStore } from './mock-store'
 import { authService } from './auth'
-
-const API_BASE_URL = (import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api` : '/api')
+import { API_BASE as API_BASE_URL } from './base'
 
 class ApiClient {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T | null> {

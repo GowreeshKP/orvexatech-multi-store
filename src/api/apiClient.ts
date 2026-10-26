@@ -9,8 +9,9 @@
 
 import { useCallback } from 'react'
 import { useAuth } from '@/hooks/useAuth'
+import { API_ORIGIN } from '@/api/base'
 
-const API_BASE = import.meta.env.VITE_API_URL || ''
+const API_BASE = API_ORIGIN
 
 type FetchOptions = Omit<RequestInit, 'body'> & { body?: unknown }
 
