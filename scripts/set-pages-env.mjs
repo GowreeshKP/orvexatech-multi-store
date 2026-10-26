@@ -38,8 +38,10 @@ if (!token) {
 }
 
 const vars = {
-  VITE_API_URL: 'https://api.orvexacloud.in',
+  // Empty = same-origin /api via Pages Function proxy (functions/api/[[path]].ts)
+  VITE_API_URL: '',
   VITE_DEMO_MODE: 'false',
+  RENDER_API_ORIGIN: 'https://orvexa-api-nskw.onrender.com',
 }
 
 const res = await fetch(
