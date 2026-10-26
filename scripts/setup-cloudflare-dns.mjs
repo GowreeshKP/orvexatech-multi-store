@@ -14,14 +14,10 @@
 const ZONE_NAME = process.env.CF_ZONE_NAME || 'orvexacloud.in'
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN
 const PAGES_TARGET = process.env.PAGES_HOSTNAME || 'orvexatech-multi-store.pages.dev'
-const RENDER_TARGET = process.env.RENDER_HOSTNAME
+const RENDER_TARGET = process.env.RENDER_HOSTNAME || 'orvexa-api-nskw.onrender.com'
 
 if (!TOKEN) {
   console.error('Set CLOUDFLARE_API_TOKEN (Zone:DNS:Edit on orvexacloud.in).')
-  process.exit(1)
-}
-if (!RENDER_TARGET) {
-  console.error('Set RENDER_HOSTNAME to your Render web service host (e.g. orvexa-multi-store-api.onrender.com).')
   process.exit(1)
 }
 
