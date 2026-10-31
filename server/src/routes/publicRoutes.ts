@@ -16,7 +16,7 @@ import type { Connection } from 'mongoose'
 import { connectMasterDatabase } from '../config/db.js'
 import { PLATFORM_ROOT_DOMAIN } from '../config/plans.js'
 import { getApplicationModel, type IApplication } from '../models/master/Application.js'
-import { getTenantModel, type ITenant } from '../models/master/Tenant.js'
+import { getTenantModel, tenantAllowsSignIn, type ITenant } from '../models/master/Tenant.js'
 import { getAuditLogModel } from '../models/master/AuditLog.js'
 import { sendEmail } from '../services/mailer.js'
 import { hostLookupKeys, isPlatformHost, normalizeHostname } from '../lib/hosts.js'
@@ -104,14 +104,32 @@ function storeTypeFor(niche: string): string {
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
 
 function publicTenant(t: ITenant) {
+  const theme = (t.theme || {}) as Record<string, unknown>
+  const copy = (theme.copy && typeof theme.copy === 'object' ? theme.copy : {}) as Record<string, string>
+  // Profile fields may live in theme.copy until PUT /stores/:slug/profile is deployed on Render.
+  const brandName = t.brandName || copy._profileBrandName || ''
+  const logo = t.logo || (typeof theme.logoUrl === 'string' ? theme.logoUrl : '') || ''
+  const aboutStory = (t as { aboutStory?: string }).aboutStory || copy._profileAbout || (typeof theme.aboutStory === 'string' ? theme.aboutStory : '') || ''
+  const contact = {
+    phone: (t as { contact?: { phone?: string } }).contact?.phone || copy._profilePhone || '',
+    email: (t as { contact?: { email?: string } }).contact?.email || copy._profileEmail || t.ownerEmail || '',
+    address: (t as { contact?: { address?: string } }).contact?.address || copy._profileAddress || '',
+    workingHours: (t as { contact?: { workingHours?: string } }).contact?.workingHours || copy._profileHours || '',
+    shippingThresholdFormatted:
+      (t as { contact?: { shippingThresholdFormatted?: string } }).contact?.shippingThresholdFormatted ||
+      copy._profileShipping ||
+      '',
+  }
   return {
     id: t.id,
     slug: t.slug,
-    brandName: t.brandName,
+    brandName,
     ownerName: t.ownerName,
     ownerEmail: t.ownerEmail,
     ownerPhone: t.ownerPhone,
-    logo: t.logo || '',
+    logo,
+    aboutStory,
+    contact,
     status: t.status,
     plan: t.plan,
     customDomain: t.customDomain || '',
@@ -122,8 +140,10 @@ function publicTenant(t: ITenant) {
     theme: t.theme,
     subscription: t.subscription,
     createdAt: t.createdAt,
-    portalPath: `/t/${t.slug}`,
-    dashboardPath: `/t/${t.slug}/dashboard`,
+    portalPath: `/${t.slug}`,
+    dashboardPath: `/dashboard/${t.slug}`,
+    storefrontUrl: `https://${PLATFORM_ROOT_DOMAIN}/${t.slug}`,
+    dashboardUrl: `https://app.${PLATFORM_ROOT_DOMAIN}/dashboard/${t.slug}`,
   }
 }
 
@@ -157,6 +177,30 @@ router.get('/resolve', async (req: Request, res: Response) => {
     res.json(publicTenant(tenant))
   } catch (err: any) {
     console.error('[Resolve] Failed:', err.message)
+    res.status(503).json({ error: 'Temporarily unavailable' })
+  }
+})
+
+const OWNER_LOGIN_KEY = /^[A-Za-z0-9_-]{16,80}$/
+const OWNER_LOGIN_MISSING = { error: 'Store owner login link is not available.' }
+
+/** Unsigned lookup for a dedicated store-owner login link. Returns branding only. */
+router.get('/owner-login/:key', async (req: Request, res: Response) => {
+  try {
+    const key = str(req.params.key)
+    if (!OWNER_LOGIN_KEY.test(key)) {
+      res.status(404).json(OWNER_LOGIN_MISSING)
+      return
+    }
+    const db = await masterDbWithinDeadline()
+    const tenant = await getTenantModel(db).findOne({ ownerLoginKey: key, ownerLoginRevoked: { $ne: true } })
+    if (!tenant || !tenantAllowsSignIn(tenant.status)) {
+      res.status(404).json(OWNER_LOGIN_MISSING)
+      return
+    }
+    res.json({ brandName: tenant.brandName, slug: tenant.slug })
+  } catch (err: any) {
+    console.error('[Owner login] Failed:', err.message)
     res.status(503).json({ error: 'Temporarily unavailable' })
   }
 })
