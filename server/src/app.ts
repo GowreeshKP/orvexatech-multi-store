@@ -9,6 +9,7 @@ import masterRoutes from './routes/masterRoutes.js'
 import storeRoutes from './routes/storeRoutes.js'
 import authRoutes from './routes/authRoutes.js'
 import publicRoutes from './routes/publicRoutes.js'
+import studioWebhook from './routes/studioWebhook.js'
 import { emailConfigured } from './services/mailer.js'
 import { PLATFORM_ROOT_DOMAIN } from './config/plans.js'
 import { hostLookupKeys } from './lib/hosts.js'
@@ -102,21 +103,27 @@ export function createApp() {
   // Automated test suites only; ignored in production.
   const skip = () => process.env.DISABLE_RATE_LIMITS === 'true' && process.env.NODE_ENV !== 'production'
 
-  // Global rate limit — storefront + admin + probes share one NAT IP in production.
+  // Global rate limit — storefront + admin + probes often share one office/NAT IP.
   const globalLimiter = rateLimit({
-    skip,
     windowMs: 15 * 60 * 1000,
-    max: 1200,
+    max: Number(process.env.API_RATE_LIMIT_MAX || 4000),
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests. Please slow down and try again later.' },
+    skip: (req) => {
+      if (skip()) return true
+      const path = req.originalUrl || req.path || ''
+      return req.method === 'POST' && path.includes('/admin/audit-logs')
+    },
   })
 
-  // Credential endpoints — tighter in production; looser locally so approve/login testing is not blocked.
+  // Credential endpoints — floor at 120 so a stale AUTH_RATE_LIMIT_MAX=10 cannot lock out NAT IPs.
   const authLimiter = rateLimit({
     skip,
     windowMs: 15 * 60 * 1000,
-    max: process.env.NODE_ENV === 'production' ? 10 : 200,
+    max: process.env.NODE_ENV === 'production'
+      ? Math.max(120, Number(process.env.AUTH_RATE_LIMIT_MAX || 120) || 120)
+      : 200,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many login attempts. Please wait 15 minutes before trying again.' },
@@ -132,9 +139,9 @@ export function createApp() {
     legacyHeaders: false,
     message: { error: 'Too many requests. Please retry shortly.' },
   })
-  // Signup connector writes — keep tight to stop abuse.
+  // Signup connector writes only — do not stack this onto GET resolve/slug-available.
   const publicWriteLimiter = rateLimit({
-    skip,
+    skip: (req) => skip() || req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
     windowMs: 60 * 1000,
     max: 60,
     standardHeaders: true,
@@ -147,6 +154,8 @@ export function createApp() {
   app.use('/api/public/resolve', publicReadLimiter)
   app.use('/api/public/slug-available', publicReadLimiter)
   app.use('/api/public', publicWriteLimiter, publicRoutes)
+  // Studio publish webhook must see the raw body for HMAC verification.
+  app.use('/api/webhooks/studio', express.raw({ type: 'application/json' }), studioWebhook)
   // Product images may be inline data URLs (≤ ~1.5 MB each); nothing legitimate needs more.
   app.use(express.json({ limit: '5mb' }))
   app.use(express.urlencoded({ extended: false, limit: '100kb' }))
